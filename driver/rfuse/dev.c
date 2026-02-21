@@ -21,6 +21,7 @@
 #include <linux/swap.h>
 #include <linux/splice.h>
 #include <linux/sched.h>
+#include <linux/io.h>
 
 
 MODULE_ALIAS_MISCDEV(FUSE_MINOR);
@@ -331,8 +332,8 @@ void fuse_request_end(struct fuse_req *req)
 		}
 
 		if (fc->num_background == fc->congestion_threshold && fm->sb) {
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
+			// clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
+			// clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
 		}
 		fc->num_background--;
 		fc->active_background--;
@@ -561,8 +562,8 @@ static bool fuse_request_queue_background(struct fuse_req *req)
 		if (fc->num_background == fc->max_background)
 			fc->blocked = 1;
 		if (fc->num_background == fc->congestion_threshold && fm->sb) {
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
+			// set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
+			// set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
 		}
 		list_add_tail(&req->list, &fc->bg_queue);
 		flush_bg_queue(fc);
@@ -758,7 +759,7 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 		}
 	} else {
 		size_t off;
-		err = iov_iter_get_pages(cs->iter, &page, PAGE_SIZE, 1, &off);
+		err = iov_iter_get_pages2(cs->iter, &page, PAGE_SIZE, 1, &off);
 		if (err < 0)
 			return err;
 		BUG_ON(!err);
@@ -795,7 +796,7 @@ static int fuse_copy_do(struct fuse_copy_state *cs, void **val, unsigned *size)
 
 static int fuse_check_page(struct page *page)
 {
-	if (page_mapcount(page) ||
+	if (page_count(page) ||
 			page->mapping != NULL ||
 			(page->flags & PAGE_FLAGS_CHECK_AT_PREP &
 			 ~(1 << PG_locked |
@@ -847,7 +848,8 @@ static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 	if (!PageUptodate(newpage))
 		SetPageUptodate(newpage);
 
-	ClearPageMappedToDisk(newpage);
+  clear_bit(PG_mappedtodisk, &newpage->flags);
+	// ClearPageMappedToDisk(newpage);
 
 	if (fuse_check_page(newpage) != 0)
 		goto out_fallback_unlock;
@@ -858,19 +860,19 @@ static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 	 */
 	if (WARN_ON(page_mapped(oldpage)))
 		goto out_fallback_unlock;
-	if (WARN_ON(page_has_private(oldpage)))
+	if (WARN_ON(folio_has_private(page_folio(oldpage))))
 		goto out_fallback_unlock;
 	if (WARN_ON(PageDirty(oldpage) || PageWriteback(oldpage)))
 		goto out_fallback_unlock;
-	if (WARN_ON(PageMlocked(oldpage)))
-		goto out_fallback_unlock;
+	// if (WARN_ON(PageMlocked(oldpage)))
+	// 	goto out_fallback_unlock;
 
-	replace_page_cache_page(oldpage, newpage);
+	replace_page_cache_folio(page_folio(oldpage), page_folio(newpage));
 
 	get_page(newpage);
 
 	if (!(buf->flags & PIPE_BUF_FLAG_LRU))
-		lru_cache_add(newpage);
+		folio_add_lru(page_folio(newpage));
 
 	err = 0;
 	spin_lock(&cs->req->waitq.lock);
@@ -2459,7 +2461,7 @@ const struct file_operations fuse_dev_operations = {
 	.owner		= THIS_MODULE,
 	.open		= fuse_dev_open,
 	.mmap		= rfuse_dev_mmap,
-	.llseek		= no_llseek,
+	.llseek		= noop_llseek,
 	.read_iter	= fuse_dev_read,
 	.splice_read	= rfuse_dev_splice_read,
 	.write_iter	= fuse_dev_write,

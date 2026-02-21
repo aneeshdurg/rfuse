@@ -172,14 +172,14 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	inode->i_uid     = make_kuid(fc->user_ns, attr->uid);
 	inode->i_gid     = make_kgid(fc->user_ns, attr->gid);
 	inode->i_blocks  = attr->blocks;
-	inode->i_atime.tv_sec   = attr->atime;
-	inode->i_atime.tv_nsec  = attr->atimensec;
+	// inode->i_atime.tv_sec   = attr->atime;
+	// inode->i_atime.tv_nsec  = attr->atimensec;
 	/* mtime from server may be stale due to local buffered write */
 	if (!fc->writeback_cache || !S_ISREG(inode->i_mode)) {
-		inode->i_mtime.tv_sec   = attr->mtime;
-		inode->i_mtime.tv_nsec  = attr->mtimensec;
-		inode->i_ctime.tv_sec   = attr->ctime;
-		inode->i_ctime.tv_nsec  = attr->ctimensec;
+		//inode->i_mtime.tv_sec   = attr->mtime;
+		//inode->i_mtime.tv_nsec  = attr->mtimensec;
+		//inode->i_ctime.tv_sec   = attr->ctime;
+		//inode->i_ctime.tv_nsec  = attr->ctimensec;
 	}
 
 	if (attr->blksize != 0)
@@ -225,7 +225,7 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 		return;
 	}
 
-	old_mtime = inode->i_mtime;
+	// old_mtime = inode->i_mtime;
 	fuse_change_attributes_common(inode, attr, attr_valid);
 
 	oldsize = inode->i_size;
@@ -268,10 +268,10 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr)
 {
 	inode->i_mode = attr->mode & S_IFMT;
 	inode->i_size = attr->size;
-	inode->i_mtime.tv_sec  = attr->mtime;
-	inode->i_mtime.tv_nsec = attr->mtimensec;
-	inode->i_ctime.tv_sec  = attr->ctime;
-	inode->i_ctime.tv_nsec = attr->ctimensec;
+	// inode->i_mtime.tv_sec  = attr->mtime;
+	// inode->i_mtime.tv_nsec = attr->mtimensec;
+	// inode->i_ctime.tv_sec  = attr->ctime;
+	// inode->i_ctime.tv_nsec = attr->ctimensec;
 	if (S_ISREG(inode->i_mode)) {
 		fuse_init_common(inode);
 		fuse_init_file_inode(inode);
@@ -1210,12 +1210,12 @@ static void fuse_fill_attr_from_inode(struct fuse_attr *attr,
 		.ino		= fi->inode.i_ino,
 		.size		= fi->inode.i_size,
 		.blocks		= fi->inode.i_blocks,
-		.atime		= fi->inode.i_atime.tv_sec,
-		.mtime		= fi->inode.i_mtime.tv_sec,
-		.ctime		= fi->inode.i_ctime.tv_sec,
-		.atimensec	= fi->inode.i_atime.tv_nsec,
-		.mtimensec	= fi->inode.i_mtime.tv_nsec,
-		.ctimensec	= fi->inode.i_ctime.tv_nsec,
+		// .atime		= fi->inode.i_atime.tv_sec,
+		// .mtime		= fi->inode.i_mtime.tv_sec,
+		// .ctime		= fi->inode.i_ctime.tv_sec,
+		// .atimensec	= fi->inode.i_atime.tv_nsec,
+		// .mtimensec	= fi->inode.i_mtime.tv_nsec,
+		// .ctimensec	= fi->inode.i_ctime.tv_nsec,
 		.mode		= fi->inode.i_mode,
 		.nlink		= fi->inode.i_nlink,
 		.uid		= fi->inode.i_uid.val,
@@ -1276,7 +1276,7 @@ static int fuse_fill_super_submount(struct super_block *sb,
 	 * that, though, so undo it here.
 	 */
 	get_fuse_inode(root)->nlookup--;
-	sb->s_d_op = &fuse_dentry_operations;
+	// sb->s_d_op = &fuse_dentry_operations;
 	sb->s_root = d_make_root(root);
 	if (!sb->s_root)
 		return -ENOMEM;
@@ -1398,12 +1398,12 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 
 	err = -ENOMEM;
 	root = fuse_get_root_inode(sb, ctx->rootmode);
-	sb->s_d_op = &fuse_root_dentry_operations;
+	// sb->s_d_op = &fuse_root_dentry_operations;
 	root_dentry = d_make_root(root);
 	if (!root_dentry)
 		goto err_dev_free;
 	/* Root dentry doesn't have .d_revalidate */
-	sb->s_d_op = &fuse_dentry_operations;
+	// sb->s_d_op = &fuse_dentry_operations;
 
 	mutex_lock(&fuse_mutex);
 	err = -EINVAL;

@@ -555,7 +555,7 @@ static void rfuse_aio_complete(struct fuse_io_priv *io, int err, ssize_t pos)
 			spin_unlock(&fi->lock);
 		}
 
-		io->iocb->ki_complete(io->iocb, res, 0);
+		io->iocb->ki_complete(io->iocb, res);
 	}
 
 	kref_put(&io->refcnt, rfuse_io_release);
@@ -592,7 +592,7 @@ static int rfuse_get_user_pages(struct rfuse_io_args *ria, struct iov_iter *ii,
 		unsigned npages;
 		size_t start;
 		printk("rfuse_get_user_pages: while start\n");
-		ret = iov_iter_get_pages(ii, &rp->pages[rp->num_pages],
+		ret = iov_iter_get_pages2(ii, &rp->pages[rp->num_pages],
 					*nbytesp - nbytes,
 					max_pages - rp->num_pages,
 					&start);
@@ -946,7 +946,7 @@ static ssize_t rfuse_fill_write_pages(struct rfuse_io_args *ria, struct address_
 
  again:
 		err = -EFAULT;
-		if (iov_iter_fault_in_readable(ii, bytes))
+		if (fault_in_readable(ii, bytes))
 			break;
 
 		err = -ENOMEM;
@@ -957,7 +957,7 @@ static ssize_t rfuse_fill_write_pages(struct rfuse_io_args *ria, struct address_
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
 
-		tmp = copy_page_from_iter_atomic(page, offset, bytes, ii);
+		tmp = copy_folio_from_iter_atomic(page_folio(page), offset, bytes, ii);
 		flush_dcache_page(page);
 
 		if (!tmp) {
@@ -1301,7 +1301,7 @@ static void rfuse_writepage_finish(struct fuse_mount *fm,
 
 	for (i = 0; i < rp->num_pages; i++) {
 		dec_wb_stat(&bdi->wb, WB_WRITEBACK);
-		dec_node_page_state(rp->pages[i], NR_WRITEBACK_TEMP);
+		dec_node_page_state(rp->pages[i], NR_WRITEBACK);
 		wb_writeout_inc(&bdi->wb);
 	}
 	wake_up(&fi->page_waitq);
@@ -1855,20 +1855,20 @@ unlock:
 	return copied;
 }
 
-int rfuse_launder_page(struct page *page)
-{
-	int err = 0;
-	if (clear_page_dirty_for_io(page)) {
-		struct inode *inode = page->mapping->host;
-
-		/* Serialize with pending writeback for the same page */
-		rfuse_wait_on_page_writeback(inode, page->index);
-		err = rfuse_writepage_locked(page);
-		if (!err)
-			rfuse_wait_on_page_writeback(inode, page->index);
-	}
-	return err;
-}
+// int rfuse_launder_page(struct page *page)
+// {
+// 	int err = 0;
+// 	if (clear_page_dirty_for_io(page)) {
+// 		struct inode *inode = page->mapping->host;
+// 
+// 		/* Serialize with pending writeback for the same page */
+// 		rfuse_wait_on_page_writeback(inode, page->index);
+// 		err = rfuse_writepage_locked(page);
+// 		if (!err)
+// 			rfuse_wait_on_page_writeback(inode, page->index);
+// 	}
+// 	return err;
+// }
 
 /************ 5. READ ************/
 

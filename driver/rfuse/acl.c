@@ -98,9 +98,9 @@ int fuse_set_acl(struct user_namespace *mnt_userns, struct inode *inode,
 			return ret;
 		}
 
-		if (!in_group_p(i_gid_into_mnt(&init_user_ns, inode)) &&
-		    !capable_wrt_inode_uidgid(&init_user_ns, inode, CAP_FSETID))
-			extra_flags |= FUSE_SETXATTR_ACL_KILL_SGID;
+		// if (!in_group_p(i_gid_into_mnt(&init_user_ns, inode)) &&
+		//     !capable_wrt_inode_uidgid(&init_user_ns, inode, CAP_FSETID))
+		// 	extra_flags |= FUSE_SETXATTR_ACL_KILL_SGID;
 
 		ret = fuse_setxattr(inode, name, value, size, 0, extra_flags);
 		kfree(value);

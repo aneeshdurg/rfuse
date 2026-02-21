@@ -678,7 +678,7 @@ static void fuse_aio_complete(struct fuse_io_priv *io, int err, ssize_t pos)
 			spin_unlock(&fi->lock);
 		}
 
-		io->iocb->ki_complete(io->iocb, res, 0);
+		io->iocb->ki_complete(io->iocb, res);
 	}
 
 	kref_put(&io->refcnt, fuse_io_release);
@@ -1054,8 +1054,10 @@ static ssize_t fuse_cache_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		if (err)
 			return err;
 
-		if (fc->handle_killpriv_v2 &&
-		    should_remove_suid(file_dentry(file))) {
+		// if (fc->handle_killpriv_v2 &&
+		//     should_remove_suid(file_dentry(file))) {
+		if (fc->handle_killpriv_v2) {// &&
+		    //should_remove_suid(file_dentry(file))) {
 			goto writethrough;
 		}
 
@@ -1066,7 +1068,7 @@ writethrough:
 	inode_lock(inode);
 
 	/* We can write back this queue in page reclaim */
-	current->backing_dev_info = inode_to_bdi(inode);
+	// current->backing_dev_info = inode_to_bdi(inode);
 
 	err = generic_write_checks(iocb, from);
 	if (err <= 0)
@@ -1112,7 +1114,7 @@ writethrough:
 			iocb->ki_pos += written;
 	}
 out:
-	current->backing_dev_info = NULL;
+	// current->backing_dev_info = NULL;
 	inode_unlock(inode);
 	if (written > 0)
 		written = generic_write_sync(iocb, written);
@@ -1122,7 +1124,7 @@ out:
 
 static inline unsigned long fuse_get_user_addr(const struct iov_iter *ii)
 {
-	return (unsigned long)ii->iov->iov_base + ii->iov_offset;
+	return (unsigned long)ii->__iov->iov_base + ii->iov_offset;
 }
 
 static inline size_t fuse_get_frag_size(const struct iov_iter *ii,
@@ -1156,7 +1158,7 @@ static int fuse_get_user_pages(struct fuse_args_pages *ap, struct iov_iter *ii,
 	while (nbytes < *nbytesp && ap->num_pages < max_pages) {
 		unsigned npages;
 		size_t start;
-		ret = iov_iter_get_pages(ii, &ap->pages[ap->num_pages],
+		ret = iov_iter_get_pages2(ii, &ap->pages[ap->num_pages],
 					*nbytesp - nbytes,
 					max_pages - ap->num_pages,
 					&start);
@@ -1388,7 +1390,7 @@ static void fuse_writepage_finish(struct fuse_mount *fm,
 
 	for (i = 0; i < ap->num_pages; i++) {
 		dec_wb_stat(&bdi->wb, WB_WRITEBACK);
-		dec_node_page_state(ap->pages[i], NR_WRITEBACK_TEMP);
+		dec_node_page_state(ap->pages[i], NR_WRITEBACK);
 		wb_writeout_inc(&bdi->wb);
 	}
 	wake_up(&fi->page_waitq);
@@ -1676,27 +1678,27 @@ static void fuse_vma_close(struct vm_area_struct *vma)
  * - sync(2)
  * - try_to_free_pages() with order > PAGE_ALLOC_COSTLY_ORDER
  */
-static vm_fault_t fuse_page_mkwrite(struct vm_fault *vmf)
-{
-	struct page *page = vmf->page;
-	struct inode *inode = file_inode(vmf->vma->vm_file);
-
-	file_update_time(vmf->vma->vm_file);
-	lock_page(page);
-	if (page->mapping != inode->i_mapping) {
-		unlock_page(page);
-		return VM_FAULT_NOPAGE;
-	}
-
-	fuse_wait_on_page_writeback(inode, page->index);
-	return VM_FAULT_LOCKED;
-}
+// static vm_fault_t fuse_page_mkwrite(struct vm_fault *vmf)
+// {
+// 	struct page *page = vmf->page;
+// 	struct inode *inode = file_inode(vmf->vma->vm_file);
+// 
+// 	file_update_time(vmf->vma->vm_file);
+// 	lock_page(page);
+// 	if (page->mapping != inode->i_mapping) {
+// 		unlock_page(page);
+// 		return VM_FAULT_NOPAGE;
+// 	}
+// 
+// 	fuse_wait_on_page_writeback(inode, page->index);
+// 	return VM_FAULT_LOCKED;
+// }
 
 static const struct vm_operations_struct fuse_file_vm_ops = {
 	.close		= fuse_vma_close,
 	.fault		= filemap_fault,
 	.map_pages	= filemap_map_pages,
-	.page_mkwrite	= fuse_page_mkwrite,
+	// .page_mkwrite	= fuse_page_mkwrite,
 };
 
 static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
@@ -1725,153 +1727,155 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
-static int convert_fuse_file_lock(struct fuse_conn *fc,
-				  const struct fuse_file_lock *ffl,
-				  struct file_lock *fl)
-{
-	switch (ffl->type) {
-	case F_UNLCK:
-		break;
+// static int convert_fuse_file_lock(struct fuse_conn *fc,
+// 				  const struct fuse_file_lock *ffl,
+// 				  struct file_lock *fl)
+// {
+// 	switch (ffl->type) {
+// 	case F_UNLCK:
+// 		break;
+// 
+// 	case F_RDLCK:
+// 	case F_WRLCK:
+// 		if (ffl->start > OFFSET_MAX || ffl->end > OFFSET_MAX ||
+// 		    ffl->end < ffl->start)
+// 			return -EIO;
+// 
+// 		fl->fl_start = ffl->start;
+// 		fl->fl_end = ffl->end;
+// 
+// 		/*
+// 		 * Convert pid into init's pid namespace.  The locks API will
+// 		 * translate it into the caller's pid namespace.
+// 		 */
+// 		rcu_read_lock();
+// 		fl->fl_pid = pid_nr_ns(find_pid_ns(ffl->pid, fc->pid_ns), &init_pid_ns);
+// 		rcu_read_unlock();
+// 		break;
+// 
+// 	default:
+// 		return -EIO;
+// 	}
+// 	fl->fl_type = ffl->type;
+// 	return 0;
+// }
 
-	case F_RDLCK:
-	case F_WRLCK:
-		if (ffl->start > OFFSET_MAX || ffl->end > OFFSET_MAX ||
-		    ffl->end < ffl->start)
-			return -EIO;
+// static void fuse_lk_fill(struct fuse_args *args, struct file *file,
+// 			 const struct file_lock *fl, int opcode, pid_t pid,
+// 			 int flock, struct fuse_lk_in *inarg)
+// {
+// 	struct inode *inode = file_inode(file);
+// 	struct fuse_conn *fc = get_fuse_conn(inode);
+// 	struct fuse_file *ff = file->private_data;
+// 
+// 	memset(inarg, 0, sizeof(*inarg));
+// 	inarg->fh = ff->fh;
+// 	inarg->owner = fuse_lock_owner_id(fc, fl->fl_owner);
+// 	inarg->lk.start = fl->fl_start;
+// 	inarg->lk.end = fl->fl_end;
+// 	inarg->lk.type = fl->fl_type;
+// 	inarg->lk.pid = pid;
+// 	if (flock)
+// 		inarg->lk_flags |= FUSE_LK_FLOCK;
+// 	args->opcode = opcode;
+// 	args->nodeid = get_node_id(inode);
+// 	args->in_numargs = 1;
+// 	args->in_args[0].size = sizeof(*inarg);
+// 	args->in_args[0].value = inarg;
+// }
 
-		fl->fl_start = ffl->start;
-		fl->fl_end = ffl->end;
+// static int fuse_getlk(struct file *file, struct file_lock *fl)
+// {
+// 	struct inode *inode = file_inode(file);
+// 	struct fuse_mount *fm = get_fuse_mount(inode);
+// 	FUSE_ARGS(args);
+// 	struct fuse_lk_in inarg;
+// 	struct fuse_lk_out outarg;
+// 	int err;
+// 
+// 	fuse_lk_fill(&args, file, fl, FUSE_GETLK, 0, 0, &inarg);
+// 	args.out_numargs = 1;
+// 	args.out_args[0].size = sizeof(outarg);
+// 	args.out_args[0].value = &outarg;
+// 	err = fuse_simple_request(fm, &args);
+// 	if (!err)
+// 		err = convert_fuse_file_lock(fm->fc, &outarg.lk, fl);
+// 
+// 	return err;
+// }
 
-		/*
-		 * Convert pid into init's pid namespace.  The locks API will
-		 * translate it into the caller's pid namespace.
-		 */
-		rcu_read_lock();
-		fl->fl_pid = pid_nr_ns(find_pid_ns(ffl->pid, fc->pid_ns), &init_pid_ns);
-		rcu_read_unlock();
-		break;
-
-	default:
-		return -EIO;
-	}
-	fl->fl_type = ffl->type;
-	return 0;
-}
-
-static void fuse_lk_fill(struct fuse_args *args, struct file *file,
-			 const struct file_lock *fl, int opcode, pid_t pid,
-			 int flock, struct fuse_lk_in *inarg)
-{
-	struct inode *inode = file_inode(file);
-	struct fuse_conn *fc = get_fuse_conn(inode);
-	struct fuse_file *ff = file->private_data;
-
-	memset(inarg, 0, sizeof(*inarg));
-	inarg->fh = ff->fh;
-	inarg->owner = fuse_lock_owner_id(fc, fl->fl_owner);
-	inarg->lk.start = fl->fl_start;
-	inarg->lk.end = fl->fl_end;
-	inarg->lk.type = fl->fl_type;
-	inarg->lk.pid = pid;
-	if (flock)
-		inarg->lk_flags |= FUSE_LK_FLOCK;
-	args->opcode = opcode;
-	args->nodeid = get_node_id(inode);
-	args->in_numargs = 1;
-	args->in_args[0].size = sizeof(*inarg);
-	args->in_args[0].value = inarg;
-}
-
-static int fuse_getlk(struct file *file, struct file_lock *fl)
-{
-	struct inode *inode = file_inode(file);
-	struct fuse_mount *fm = get_fuse_mount(inode);
-	FUSE_ARGS(args);
-	struct fuse_lk_in inarg;
-	struct fuse_lk_out outarg;
-	int err;
-
-	fuse_lk_fill(&args, file, fl, FUSE_GETLK, 0, 0, &inarg);
-	args.out_numargs = 1;
-	args.out_args[0].size = sizeof(outarg);
-	args.out_args[0].value = &outarg;
-	err = fuse_simple_request(fm, &args);
-	if (!err)
-		err = convert_fuse_file_lock(fm->fc, &outarg.lk, fl);
-
-	return err;
-}
-
-static int fuse_setlk(struct file *file, struct file_lock *fl, int flock)
-{
-	struct inode *inode = file_inode(file);
-	struct fuse_mount *fm = get_fuse_mount(inode);
-	FUSE_ARGS(args);
-	struct fuse_lk_in inarg;
-	int opcode = (fl->fl_flags & FL_SLEEP) ? FUSE_SETLKW : FUSE_SETLK;
-	struct pid *pid = fl->fl_type != F_UNLCK ? task_tgid(current) : NULL;
-	pid_t pid_nr = pid_nr_ns(pid, fm->fc->pid_ns);
-	int err;
-
-	if (fl->fl_lmops && fl->fl_lmops->lm_grant) {
-		/* NLM needs asynchronous locks, which we don't support yet */
-		return -ENOLCK;
-	}
-
-	/* Unlock on close is handled by the flush method */
-	if ((fl->fl_flags & FL_CLOSE_POSIX) == FL_CLOSE_POSIX)
-		return 0;
-
-	fuse_lk_fill(&args, file, fl, opcode, pid_nr, flock, &inarg);
-	err = fuse_simple_request(fm, &args);
-
-	/* locking is restartable */
-	if (err == -EINTR)
-		err = -ERESTARTSYS;
-
-	return err;
-}
+// static int fuse_setlk(struct file *file, struct file_lock *fl, int flock)
+// {
+// 	struct inode *inode = file_inode(file);
+// 	struct fuse_mount *fm = get_fuse_mount(inode);
+// 	FUSE_ARGS(args);
+// 	struct fuse_lk_in inarg;
+// 	int opcode = (fl->fl_flags & FL_SLEEP) ? FUSE_SETLKW : FUSE_SETLK;
+// 	struct pid *pid = fl->fl_type != F_UNLCK ? task_tgid(current) : NULL;
+// 	pid_t pid_nr = pid_nr_ns(pid, fm->fc->pid_ns);
+// 	int err;
+// 
+// 	if (fl->fl_lmops && fl->fl_lmops->lm_grant) {
+// 		/* NLM needs asynchronous locks, which we don't support yet */
+// 		return -ENOLCK;
+// 	}
+// 
+// 	/* Unlock on close is handled by the flush method */
+// 	if ((fl->fl_flags & FL_CLOSE_POSIX) == FL_CLOSE_POSIX)
+// 		return 0;
+// 
+// 	fuse_lk_fill(&args, file, fl, opcode, pid_nr, flock, &inarg);
+// 	err = fuse_simple_request(fm, &args);
+// 
+// 	/* locking is restartable */
+// 	if (err == -EINTR)
+// 		err = -ERESTARTSYS;
+// 
+// 	return err;
+// }
 
 static int fuse_file_lock(struct file *file, int cmd, struct file_lock *fl)
 {
-	struct inode *inode = file_inode(file);
-	struct fuse_conn *fc = get_fuse_conn(inode);
-	int err;
+  return 0;
+	// struct inode *inode = file_inode(file);
+	// struct fuse_conn *fc = get_fuse_conn(inode);
+	// int err;
 
-	if (cmd == F_CANCELLK) {
-		err = 0;
-	} else if (cmd == F_GETLK) {
-		if (fc->no_lock) {
-			posix_test_lock(file, fl);
-			err = 0;
-		} else
-			err = fuse_getlk(file, fl);
-	} else {
-		if (fc->no_lock)
-			err = posix_lock_file(file, fl, NULL);
-		else
-			err = fuse_setlk(file, fl, 0);
-	}
-	return err;
+	// if (cmd == F_CANCELLK) {
+	// 	err = 0;
+	// } else if (cmd == F_GETLK) {
+	// 	if (fc->no_lock) {
+	// 		posix_test_lock(file, fl);
+	// 		err = 0;
+	// 	} else
+	// 		err = fuse_getlk(file, fl);
+	// } else {
+	// 	if (fc->no_lock)
+	// 		err = posix_lock_file(file, fl, NULL);
+	// 	else
+	// 		err = fuse_setlk(file, fl, 0);
+	// }
+	// return err;
 }
 
 static int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
 {
-	struct inode *inode = file_inode(file);
-	struct fuse_conn *fc = get_fuse_conn(inode);
-	int err;
+  return 0;
+	// struct inode *inode = file_inode(file);
+	// struct fuse_conn *fc = get_fuse_conn(inode);
+	// int err;
 
-	if (fc->no_flock) {
-		err = locks_lock_file_wait(file, fl);
-	} else {
-		struct fuse_file *ff = file->private_data;
+	// if (fc->no_flock) {
+	// 	err = locks_lock_file_wait(file, fl);
+	// } else {
+	// 	struct fuse_file *ff = file->private_data;
 
-		/* emulate flock with POSIX locks */
-		ff->flock = true;
-		err = fuse_setlk(file, fl, 1);
-	}
+	// 	/* emulate flock with POSIX locks */
+	// 	ff->flock = true;
+	// 	err = fuse_setlk(file, fl, 1);
+	// }
 
-	return err;
+	// return err;
 }
 
 static sector_t fuse_bmap(struct address_space *mapping, sector_t block)
@@ -2328,9 +2332,9 @@ static ssize_t fuse_copy_file_range(struct file *src_file, loff_t src_off,
 	ret = __fuse_copy_file_range(src_file, src_off, dst_file, dst_off,
 				     len, flags);
 
-	if (ret == -EOPNOTSUPP || ret == -EXDEV)
-		ret = generic_copy_file_range(src_file, src_off, dst_file,
-					      dst_off, len, flags);
+	// if (ret == -EOPNOTSUPP || ret == -EXDEV)
+	// 	ret = generic_copy_file_range(src_file, src_off, dst_file,
+	//			      dst_off, len, flags);
 	return ret;
 }
 
@@ -2346,8 +2350,8 @@ static const struct file_operations fuse_file_operations = {
 	.lock		= fuse_file_lock,
 	.get_unmapped_area = thp_get_unmapped_area,
 	.flock		= fuse_file_flock,
-	.splice_read	= generic_file_splice_read,
-	.splice_write	= iter_file_splice_write,
+	// .splice_read	= generic_file_splice_read,
+	// .splice_write	= iter_file_splice_write,
 	// .unlocked_ioctl	= fuse_file_ioctl,
 	// .compat_ioctl	= fuse_file_compat_ioctl,
 	.poll		= fuse_file_poll,
@@ -2356,16 +2360,16 @@ static const struct file_operations fuse_file_operations = {
 };
 
 static const struct address_space_operations fuse_file_aops  = {
-	.readpage	= fuse_readpage,
+	// .readpage	= fuse_readpage,
 	.readahead	= fuse_readahead,
-	.writepage	= fuse_writepage,
+	// .writepage	= fuse_writepage,
 	.writepages	= fuse_writepages,
-	.launder_page	= fuse_launder_page,
-	.set_page_dirty	= __set_page_dirty_nobuffers,
+	// .launder_page	= fuse_launder_page,
+	// .set_page_dirty	= __set_page_dirty_nobuffers,
 	.bmap		= fuse_bmap,
 	.direct_IO	= rfuse_direct_IO,
-	.write_begin	= fuse_write_begin,
-	.write_end	= fuse_write_end,
+	// .write_begin	= fuse_write_begin,
+	// .write_end	= fuse_write_end,
 };
 
 void fuse_init_file_inode(struct inode *inode)

@@ -143,10 +143,10 @@ static void rfuse_fillattr(struct inode *inode, struct fuse_attr *attr, struct k
 	/* see the comment in fuse_change_attributes() */
 	if (fc->writeback_cache && S_ISREG(inode->i_mode)) {
 		attr->size = i_size_read(inode);
-		attr->mtime = inode->i_mtime.tv_sec;
-		attr->mtimensec = inode->i_mtime.tv_nsec;
-		attr->ctime = inode->i_ctime.tv_sec;
-		attr->ctimensec = inode->i_ctime.tv_nsec;
+		// attr->mtime = inode->i_mtime.tv_sec;
+		// attr->mtimensec = inode->i_mtime.tv_nsec;
+		// attr->ctime = inode->i_ctime.tv_sec;
+		// attr->ctimensec = inode->i_ctime.tv_nsec;
 	}
 
 	stat->dev = inode->i_sb->s_dev;
@@ -483,7 +483,7 @@ int rfuse_do_setattr(struct dentry *dentry, struct iattr *attr, struct file *fil
 	if (!fc->default_permissions)
 		attr->ia_valid |= ATTR_FORCE;
 
-	err = setattr_prepare(&init_user_ns, dentry, attr);
+	err = setattr_prepare(&nop_mnt_idmap, dentry, attr);
 	if (err)
 		return err;
 
@@ -589,10 +589,10 @@ int rfuse_do_setattr(struct dentry *dentry, struct iattr *attr, struct file *fil
 	spin_lock(&fi->lock);
 	/* the kernel maintains i_mtime locally */
 	if (trust_local_cmtime) {
-		if (attr->ia_valid & ATTR_MTIME)
-			inode->i_mtime = attr->ia_mtime;
-		if (attr->ia_valid & ATTR_CTIME)
-			inode->i_ctime = attr->ia_ctime;
+		// if (attr->ia_valid & ATTR_MTIME)
+		// 	inode->i_mtime = attr->ia_mtime;
+		// if (attr->ia_valid & ATTR_CTIME)
+		// 	inode->i_ctime = attr->ia_ctime;
 		/* FIXME: clear I_DIRTY_SYNC? */
 	}
 
@@ -998,12 +998,12 @@ int rfuse_flush_times(struct inode *inode, struct fuse_file *ff)
 	memset(&outarg, 0, sizeof(outarg));
 
 	inarg->valid = FATTR_MTIME;
-	inarg->mtime = inode->i_mtime.tv_sec;
-	inarg->mtimensec = inode->i_mtime.tv_nsec;
+	// inarg->mtime = inode->i_mtime.tv_sec;
+	// inarg->mtimensec = inode->i_mtime.tv_nsec;
 	if (fm->fc->minor >= 23) {
 		inarg->valid |= FATTR_CTIME;
-		inarg->ctime = inode->i_ctime.tv_sec;
-		inarg->ctimensec = inode->i_ctime.tv_nsec;
+		// inarg->ctime = inode->i_ctime.tv_sec;
+		// inarg->ctimensec = inode->i_ctime.tv_nsec;
 	}
 	if (ff) {
 		inarg->valid |= FATTR_FH;

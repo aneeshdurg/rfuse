@@ -416,75 +416,75 @@ static void fuse_priv_ioctl_cleanup(struct inode *inode, struct fuse_file *ff)
 	fuse_file_release(inode, ff, O_RDONLY, NULL, S_ISDIR(inode->i_mode));
 }
 
-int fuse_fileattr_get(struct dentry *dentry, struct fileattr *fa)
-{
-	struct inode *inode = d_inode(dentry);
-	struct fuse_file *ff;
-	unsigned int flags;
-	struct fsxattr xfa;
-	int err;
+// int fuse_fileattr_get(struct dentry *dentry, struct fileattr *fa)
+// {
+// 	struct inode *inode = d_inode(dentry);
+// 	struct fuse_file *ff;
+// 	unsigned int flags;
+// 	struct fsxattr xfa;
+// 	int err;
+// 
+// 	ff = fuse_priv_ioctl_prepare(inode);
+// 	if (IS_ERR(ff))
+// 		return PTR_ERR(ff);
+// 
+// 	if (fa->flags_valid) {
+// 		err = fuse_priv_ioctl(inode, ff, FS_IOC_GETFLAGS,
+// 				      &flags, sizeof(flags));
+// 		if (err)
+// 			goto cleanup;
+// 
+// 		fileattr_fill_flags(fa, flags);
+// 	} else {
+// 		err = fuse_priv_ioctl(inode, ff, FS_IOC_FSGETXATTR,
+// 				      &xfa, sizeof(xfa));
+// 		if (err)
+// 			goto cleanup;
+// 
+// 		fileattr_fill_xflags(fa, xfa.fsx_xflags);
+// 		fa->fsx_extsize = xfa.fsx_extsize;
+// 		fa->fsx_nextents = xfa.fsx_nextents;
+// 		fa->fsx_projid = xfa.fsx_projid;
+// 		fa->fsx_cowextsize = xfa.fsx_cowextsize;
+// 	}
+// cleanup:
+// 	fuse_priv_ioctl_cleanup(inode, ff);
+// 
+// 	return err;
+// }
 
-	ff = fuse_priv_ioctl_prepare(inode);
-	if (IS_ERR(ff))
-		return PTR_ERR(ff);
-
-	if (fa->flags_valid) {
-		err = fuse_priv_ioctl(inode, ff, FS_IOC_GETFLAGS,
-				      &flags, sizeof(flags));
-		if (err)
-			goto cleanup;
-
-		fileattr_fill_flags(fa, flags);
-	} else {
-		err = fuse_priv_ioctl(inode, ff, FS_IOC_FSGETXATTR,
-				      &xfa, sizeof(xfa));
-		if (err)
-			goto cleanup;
-
-		fileattr_fill_xflags(fa, xfa.fsx_xflags);
-		fa->fsx_extsize = xfa.fsx_extsize;
-		fa->fsx_nextents = xfa.fsx_nextents;
-		fa->fsx_projid = xfa.fsx_projid;
-		fa->fsx_cowextsize = xfa.fsx_cowextsize;
-	}
-cleanup:
-	fuse_priv_ioctl_cleanup(inode, ff);
-
-	return err;
-}
-
-int fuse_fileattr_set(struct user_namespace *mnt_userns,
-		      struct dentry *dentry, struct fileattr *fa)
-{
-	struct inode *inode = d_inode(dentry);
-	struct fuse_file *ff;
-	unsigned int flags = fa->flags;
-	struct fsxattr xfa;
-	int err;
-
-	ff = fuse_priv_ioctl_prepare(inode);
-	if (IS_ERR(ff))
-		return PTR_ERR(ff);
-
-	if (fa->flags_valid) {
-		err = fuse_priv_ioctl(inode, ff, FS_IOC_SETFLAGS,
-				      &flags, sizeof(flags));
-		if (err)
-			goto cleanup;
-	} else {
-		memset(&xfa, 0, sizeof(xfa));
-		xfa.fsx_xflags = fa->fsx_xflags;
-		xfa.fsx_extsize = fa->fsx_extsize;
-		xfa.fsx_nextents = fa->fsx_nextents;
-		xfa.fsx_projid = fa->fsx_projid;
-		xfa.fsx_cowextsize = fa->fsx_cowextsize;
-
-		err = fuse_priv_ioctl(inode, ff, FS_IOC_FSSETXATTR,
-				      &xfa, sizeof(xfa));
-	}
-
-cleanup:
-	fuse_priv_ioctl_cleanup(inode, ff);
-
-	return err;
-}
+// int fuse_fileattr_set(struct user_namespace *mnt_userns,
+// 		      struct dentry *dentry, struct fileattr *fa)
+// {
+// 	struct inode *inode = d_inode(dentry);
+// 	struct fuse_file *ff;
+// 	unsigned int flags = fa->flags;
+// 	struct fsxattr xfa;
+// 	int err;
+// 
+// 	ff = fuse_priv_ioctl_prepare(inode);
+// 	if (IS_ERR(ff))
+// 		return PTR_ERR(ff);
+// 
+// 	if (fa->flags_valid) {
+// 		err = fuse_priv_ioctl(inode, ff, FS_IOC_SETFLAGS,
+// 				      &flags, sizeof(flags));
+// 		if (err)
+// 			goto cleanup;
+// 	} else {
+// 		memset(&xfa, 0, sizeof(xfa));
+// 		xfa.fsx_xflags = fa->fsx_xflags;
+// 		xfa.fsx_extsize = fa->fsx_extsize;
+// 		xfa.fsx_nextents = fa->fsx_nextents;
+// 		xfa.fsx_projid = fa->fsx_projid;
+// 		xfa.fsx_cowextsize = fa->fsx_cowextsize;
+// 
+// 		err = fuse_priv_ioctl(inode, ff, FS_IOC_FSSETXATTR,
+// 				      &xfa, sizeof(xfa));
+// 	}
+// 
+// cleanup:
+// 	fuse_priv_ioctl_cleanup(inode, ff);
+// 
+// 	return err;
+// }

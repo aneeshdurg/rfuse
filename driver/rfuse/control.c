@@ -187,11 +187,11 @@ static ssize_t fuse_conn_congestion_threshold_write(struct file *file,
 	if (!list_empty(&fc->mounts)) {
 		fm = list_first_entry(&fc->mounts, struct fuse_mount, fc_entry);
 		if (fc->num_background < fc->congestion_threshold) {
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
+			// clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
+			// clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
 		} else {
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
+			// set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
+			// set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
 		}
 	}
 	spin_unlock(&fc->bg_lock);
@@ -204,27 +204,27 @@ out:
 static const struct file_operations fuse_ctl_abort_ops = {
 	.open = nonseekable_open,
 	.write = fuse_conn_abort_write,
-	.llseek = no_llseek,
+	.llseek = noop_llseek,
 };
 
 static const struct file_operations fuse_ctl_waiting_ops = {
 	.open = nonseekable_open,
 	.read = fuse_conn_waiting_read,
-	.llseek = no_llseek,
+	.llseek = noop_llseek,
 };
 
 static const struct file_operations fuse_conn_max_background_ops = {
 	.open = nonseekable_open,
 	.read = fuse_conn_max_background_read,
 	.write = fuse_conn_max_background_write,
-	.llseek = no_llseek,
+	.llseek = noop_llseek,
 };
 
 static const struct file_operations fuse_conn_congestion_threshold_ops = {
 	.open = nonseekable_open,
 	.read = fuse_conn_congestion_threshold_read,
 	.write = fuse_conn_congestion_threshold_write,
-	.llseek = no_llseek,
+	.llseek = noop_llseek,
 };
 
 static struct dentry *fuse_ctl_add_dentry(struct dentry *parent,
@@ -252,13 +252,14 @@ static struct dentry *fuse_ctl_add_dentry(struct dentry *parent,
 	inode->i_mode = mode;
 	inode->i_uid = fc->user_id;
 	inode->i_gid = fc->group_id;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	// inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
 	/* setting ->i_op to NULL is not allowed */
 	if (iop)
 		inode->i_op = iop;
 	inode->i_fop = fop;
 	set_nlink(inode, nlink);
 	inode->i_private = fc;
+  dentry->d_op = &fuse_dentry_operations;
 	d_add(dentry, inode);
 
 	fc->ctl_dentry[fc->ctl_ndents++] = dentry;

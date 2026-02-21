@@ -14,6 +14,7 @@
 #include <linux/splice.h>
 #include <linux/sched.h>
 #include <linux/random.h>
+#include <linux/io.h>
 #include <asm/atomic.h>
 
 #include <linux/ktime.h>
@@ -98,7 +99,7 @@ static void rfuse_force_creds(struct rfuse_req *r_req){
 
 static int rfuse_check_page(struct page *page)
 {
-	if (page_mapcount(page) ||
+	if (page_count(page) ||
 			page->mapping != NULL ||
 			(page->flags & PAGE_FLAGS_CHECK_AT_PREP &
 			 ~(1 << PG_locked |
@@ -1029,8 +1030,8 @@ static bool rfuse_request_queue_background(struct rfuse_req *r_req)
 			riq->blocked = 1;
 		}
 		if (riq->num_background == riq->congestion_threshold && fm->sb) {
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
+			// set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
+			// set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
 		}
 		list_add_tail(&bg_entry->list, &riq->bg_queue); // Add it to background queue
 		rfuse_flush_bg_queue(fc, r_req->riq_id);
@@ -1075,8 +1076,8 @@ void rfuse_request_end(struct rfuse_req *r_req){
 		}
 
 		if (riq->num_background == riq->congestion_threshold && fm->sb) {
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
+			// clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
+			// clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
 		}
 		riq->num_background--;
 		riq->active_background--;
@@ -1233,7 +1234,7 @@ static int rfuse_copy_fill(struct rfuse_copy_state *rcs)
 		}
 	} else {
 		size_t off;
-		err = iov_iter_get_pages(rcs->iter, &page, PAGE_SIZE, 1, &off);
+		err = iov_iter_get_pages2(rcs->iter, &page, PAGE_SIZE, 1, &off);
 		if (err < 0)
 			return err;
 		BUG_ON(!err);
@@ -1303,7 +1304,7 @@ static int rfuse_try_move_page(struct rfuse_copy_state *rcs, struct page **pagep
 	if (!PageUptodate(newpage))
 		SetPageUptodate(newpage);
 
-	ClearPageMappedToDisk(newpage);
+  clear_bit(PG_mappedtodisk, &newpage->flags);
 
 	if (rfuse_check_page(newpage) != 0)
 		goto out_fallback_unlock;
@@ -1314,19 +1315,19 @@ static int rfuse_try_move_page(struct rfuse_copy_state *rcs, struct page **pagep
 	 */
 	if (WARN_ON(page_mapped(oldpage)))
 		goto out_fallback_unlock;
-	if (WARN_ON(page_has_private(oldpage)))
+	if (WARN_ON(folio_has_private(page_folio(oldpage))))
 		goto out_fallback_unlock;
 	if (WARN_ON(PageDirty(oldpage) || PageWriteback(oldpage)))
 		goto out_fallback_unlock;
-	if (WARN_ON(PageMlocked(oldpage)))
-		goto out_fallback_unlock;
+	// if (WARN_ON(PageMlocked(oldpage)))
+	// 	goto out_fallback_unlock;
 
-	replace_page_cache_page(oldpage, newpage);
+	replace_page_cache_folio(page_folio(oldpage), page_folio(newpage));
 
 	get_page(newpage);
 
 	if (!(buf->flags & PIPE_BUF_FLAG_LRU))
-		lru_cache_add(newpage);
+    folio_add_lru(page_folio(newpage));
 
 	err = 0;
 	spin_lock(&rcs->r_req->waitq.lock);
