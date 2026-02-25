@@ -60,11 +60,13 @@ static void fuse_add_dirent_to_cache(struct file *file,
 	    WARN_ON(fi->rdc.pos != pos))
 		goto unlock;
 
-	addr = kmap_atomic(page);
-	if (!offset)
+	addr = kmap_local_page(page);
+	if (!offset) {
 		clear_page(addr);
+		SetPageUptodate(page);
+	}
 	memcpy(addr + offset, dirent, reclen);
-	kunmap_atomic(addr);
+	kunmap_local(addr);
 	fi->rdc.size = (index << PAGE_SHIFT) + offset + reclen;
 	fi->rdc.pos = dirent->off;
 unlock:
@@ -82,7 +84,7 @@ static bool fuse_emit(struct file *file, struct dir_context *ctx,
 		fuse_add_dirent_to_cache(file, dirent, ctx->pos);
 
 	return dir_emit(ctx, dirent->name, dirent->namelen, dirent->ino,
-			dirent->type);
+			dirent->type | FILLDIR_FLAG_NOINTR);
 }
 
 static int parse_dirfile(char *buf, size_t nbytes, struct file *file,
@@ -110,7 +112,7 @@ static int parse_dirfile(char *buf, size_t nbytes, struct file *file,
 
 static int fuse_direntplus_link(struct file *file,
 				struct fuse_direntplus *direntplus,
-				u64 attr_version)
+				u64 attr_version, u64 evict_ctr)
 {
 	struct fuse_entry_out *o = &direntplus->entry_out;
 	struct fuse_dirent *dirent = &direntplus->dirent;
@@ -122,6 +124,7 @@ static int fuse_direntplus_link(struct file *file,
 	struct fuse_conn *fc;
 	struct inode *inode;
 	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);
+	int epoch;
 
 	if (!o->nodeid) {
 		/*
@@ -151,6 +154,7 @@ static int fuse_direntplus_link(struct file *file,
 		return -EIO;
 
 	fc = get_fuse_conn(dir);
+	epoch = atomic_read(&fc->epoch);
 
 	name.hash = full_name_hash(parent, name.name, name.len);
 	dentry = d_lookup(parent, &name);
@@ -184,8 +188,8 @@ retry:
 		spin_unlock(&fi->lock);
 
 		forget_all_cached_acls(inode);
-		fuse_change_attributes(inode, &o->attr,
-				       entry_attr_timeout(o),
+		fuse_change_attributes(inode, &o->attr, NULL,
+				       ATTR_TIMEOUT(o),
 				       attr_version);
 		/*
 		 * The other branch comes via fuse_iget()
@@ -193,8 +197,8 @@ retry:
 		 */
 	} else {
 		inode = fuse_iget(dir->i_sb, o->nodeid, o->generation,
-				  &o->attr, entry_attr_timeout(o),
-				  attr_version);
+				  &o->attr, ATTR_TIMEOUT(o),
+				  attr_version, evict_ctr);
 		if (!inode)
 			inode = ERR_PTR(-ENOMEM);
 
@@ -204,11 +208,20 @@ retry:
 			dput(dentry);
 			dentry = alias;
 		}
-		if (IS_ERR(dentry))
+		if (IS_ERR(dentry)) {
+			if (!IS_ERR(inode)) {
+				struct fuse_inode *fi = get_fuse_inode(inode);
+
+				spin_lock(&fi->lock);
+				fi->nlookup--;
+				spin_unlock(&fi->lock);
+			}
 			return PTR_ERR(dentry);
+		}
 	}
 	if (fc->readdirplus_auto)
 		set_bit(FUSE_I_INIT_RDPLUS, &get_fuse_inode(inode)->state);
+	dentry->d_time = epoch;
 	fuse_change_entry_timeout(dentry, o);
 
 	dput(dentry);
@@ -237,7 +250,8 @@ static void fuse_force_forget(struct file *file, u64 nodeid)
 }
 
 static int parse_dirplusfile(char *buf, size_t nbytes, struct file *file,
-			     struct dir_context *ctx, u64 attr_version)
+			     struct dir_context *ctx, u64 attr_version,
+			     u64 evict_ctr)
 {
 	struct fuse_direntplus *direntplus;
 	struct fuse_dirent *dirent;
@@ -272,15 +286,13 @@ static int parse_dirplusfile(char *buf, size_t nbytes, struct file *file,
 		buf += reclen;
 		nbytes -= reclen;
 
-		ret = fuse_direntplus_link(file, direntplus, attr_version);
+		ret = fuse_direntplus_link(file, direntplus, attr_version, evict_ctr);
 		if (ret)
 			fuse_force_forget(file, direntplus->entry_out.nodeid);
 	}
 
 	return 0;
 }
-
-
 
 static bool rfuse_use_readdirplus(struct inode *dir, struct dir_context *ctx)
 {
@@ -322,36 +334,34 @@ int rfuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 {
 	int plus;
 	ssize_t res;
-	struct page *page;
 	struct inode *inode = file_inode(file);
 	struct fuse_mount *fm = get_fuse_mount(inode);
+	struct fuse_conn *fc = fm->fc;
 	struct rfuse_io_args ria = {};
 	struct rfuse_pages *rp = &ria.rp;
 	struct rfuse_req *r_req;
-	struct fuse_page_desc desc = { .length = PAGE_SIZE };
-	u64 attr_version = 0;
+	void *buf;
+	size_t bufsize = clamp((unsigned int) ctx->count, PAGE_SIZE, fc->max_pages << PAGE_SHIFT);
+	u64 attr_version = 0, evict_ctr = 0;
 	bool locked;
 
-	page = alloc_page(GFP_KERNEL);
-	if (!page)
-		return -ENOMEM;
+	// buf = kvmalloc(bufsize, GFP_KERNEL);
+	// if (!buf)
+	// 	return -ENOMEM;
+
+	// args->out_args[0].value = buf;
 
 	plus = rfuse_use_readdirplus(inode, ctx);
-	r_req = rfuse_get_req(fm, false, false); 
-	ria.r_req = r_req;
-
-	r_req->out_pages = true;
-	rp->num_pages = 1;
-	rp->pages = &page;
-	rp->descs = &desc;
-
+  r_req = rfuse_get_req(fm, false, false);
+  ria.r_req = r_req;
+  r_req->out_pages = true;
+  rp->num_pages = 1;
 	if (plus) {
 		attr_version = fuse_get_attr_version(fm->fc);
-		rfuse_read_args_fill(&ria, file, ctx->pos, PAGE_SIZE,
-				    FUSE_READDIRPLUS);
+		evict_ctr = fuse_get_evict_ctr(fm->fc);
+		rfuse_read_args_fill(&ria, file, ctx->pos, bufsize, FUSE_READDIRPLUS);
 	} else {
-		rfuse_read_args_fill(&ria, file, ctx->pos, PAGE_SIZE,
-				    FUSE_READDIR);
+		rfuse_read_args_fill(&ria, file, ctx->pos, bufsize, FUSE_READDIR);
 	}
 	locked = fuse_lock_inode(inode);
 	res = rfuse_simple_request(r_req);
@@ -363,70 +373,21 @@ int rfuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 			if (ff->open_flags & FOPEN_CACHE_DIR)
 				rfuse_readdir_cache_end(file, ctx->pos);
 		} else if (plus) {
-			res = parse_dirplusfile(page_address(page), res,
-						file, ctx, attr_version);
+			res = parse_dirplusfile(buf, res, file, ctx, attr_version,
+						evict_ctr);
 		} else {
-			res = parse_dirfile(page_address(page), res, file,
-					    ctx);
+			res = parse_dirfile(buf, res, file, ctx);
 		}
 	}
-	rfuse_put_request(r_req);
-	__free_page(page);
+
+	// kvfree(buf);
+  rfuse_put_request(r_req);
 	fuse_invalidate_atime(inode);
 	return res;
 }
 
-static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
-{
-	return rfuse_readdir_uncached(file,ctx);
-	// int plus;
-	// ssize_t res;
-	// struct page *page;
-	// struct inode *inode = file_inode(file);
-	// struct fuse_mount *fm = get_fuse_mount(inode);
-	// struct fuse_io_args ia = {};
-	// struct fuse_args_pages *ap = &ia.ap;
-	// struct fuse_page_desc desc = { .length = PAGE_SIZE };
-	// u64 attr_version = 0;
-	// bool locked;
-
-	// page = alloc_page(GFP_KERNEL);
-	// if (!page)
-	// 	return -ENOMEM;
-
-	// plus = fuse_use_readdirplus(inode, ctx);
-	// ap->args.out_pages = true;
-	// ap->num_pages = 1;
-	// ap->pages = &page;
-	// ap->descs = &desc;
-	// if (plus) {
-	// 	attr_version = fuse_get_attr_version(fm->fc);
-	// 	fuse_read_args_fill(&ia, file, ctx->pos, PAGE_SIZE,
-	// 			    FUSE_READDIRPLUS);
-	// } else {
-	// 	fuse_read_args_fill(&ia, file, ctx->pos, PAGE_SIZE,
-	// 			    FUSE_READDIR);
-	// }
-	// locked = fuse_lock_inode(inode);
-	// res = fuse_simple_request(fm, &ap->args);
-	// fuse_unlock_inode(inode, locked);
-	// if (res >= 0) {
-	// 	if (!res) {
-	// 		struct fuse_file *ff = file->private_data;
-	// 		if (ff->open_flags & FOPEN_CACHE_DIR)
-	// 			fuse_readdir_cache_end(file, ctx->pos);
-	// 	} else if (plus) {
-	// 		res = parse_dirplusfile(page_address(page), res,
-	// 					file, ctx, attr_version);
-	// 	} else {
-	// 		res = parse_dirfile(page_address(page), res, file,
-	// 				    ctx);
-	// 	}
-	// }
-
-	// __free_page(page);
-	// fuse_invalidate_atime(inode);
-	// return res;
+static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx) {
+  return rfuse_readdir_uncached(file, ctx);
 }
 
 enum fuse_parse_result {
@@ -465,7 +426,7 @@ static enum fuse_parse_result fuse_parse_cache(struct fuse_file *ff,
 		if (ff->readdir.pos == ctx->pos) {
 			res = FOUND_SOME;
 			if (!dir_emit(ctx, dirent->name, dirent->namelen,
-				      dirent->ino, dirent->type))
+				      dirent->ino, dirent->type | FILLDIR_FLAG_NOINTR))
 				return FOUND_ALL;
 			ctx->pos = dirent->off;
 		}
@@ -515,7 +476,7 @@ static int fuse_readdir_cached(struct file *file, struct dir_context *ctx)
 	 * cache; both cases require an up-to-date mtime value.
 	 */
 	if (!ctx->pos && fc->auto_inval_data) {
-		int err = fuse_update_attributes(inode, file);
+		int err = fuse_update_attributes(inode, file, STATX_MTIME);
 
 		if (err)
 			return err;
@@ -527,7 +488,7 @@ retry_locked:
 	if (!fi->rdc.cached) {
 		/* Starting cache? Set cache mtime. */
 		if (!ctx->pos && !fi->rdc.size) {
-			// fi->rdc.mtime = inode->i_mtime;
+			fi->rdc.mtime = inode_get_mtime(inode);
 			fi->rdc.iversion = inode_query_iversion(inode);
 		}
 		spin_unlock(&fi->rdc.lock);
@@ -539,9 +500,10 @@ retry_locked:
 	 * changed, and reset the cache if so.
 	 */
 	if (!ctx->pos) {
-		// if (inode_peek_iversion(inode) != fi->rdc.iversion ||
-		//     !timespec64_equal(&fi->rdc.mtime, &inode->i_mtime)) {
-		if (inode_peek_iversion(inode) != fi->rdc.iversion) {
+		struct timespec64 mtime = inode_get_mtime(inode);
+
+		if (inode_peek_iversion(inode) != fi->rdc.iversion ||
+		    !timespec64_equal(&fi->rdc.mtime, &mtime)) {
 			fuse_rdc_reset(inode);
 			goto retry_locked;
 		}
@@ -578,6 +540,12 @@ retry_locked:
 
 	page = find_get_page_flags(file->f_mapping, index,
 				   FGP_ACCESSED | FGP_LOCK);
+	/* Page gone missing, then re-added to cache, but not initialized? */
+	if (page && !PageUptodate(page)) {
+		unlock_page(page);
+		put_page(page);
+		page = NULL;
+	}
 	spin_lock(&fi->rdc.lock);
 	if (!page) {
 		/*
@@ -601,9 +569,9 @@ retry_locked:
 	 * Contents of the page are now protected against changing by holding
 	 * the page lock.
 	 */
-	addr = kmap(page);
+	addr = kmap_local_page(page);
 	res = fuse_parse_cache(ff, addr, size, ctx);
-	kunmap(page);
+	kunmap_local(addr);
 	unlock_page(page);
 	put_page(page);
 
@@ -636,15 +604,11 @@ int fuse_readdir(struct file *file, struct dir_context *ctx)
 	if (fuse_is_bad(inode))
 		return -EIO;
 
-	mutex_lock(&ff->readdir.lock);
-
 	err = UNCACHED;
 	if (ff->open_flags & FOPEN_CACHE_DIR)
 		err = fuse_readdir_cached(file, ctx);
 	if (err == UNCACHED)
 		err = fuse_readdir_uncached(file, ctx);
-
-	mutex_unlock(&ff->readdir.lock);
 
 	return err;
 }

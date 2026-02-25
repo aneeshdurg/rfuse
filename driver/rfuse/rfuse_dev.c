@@ -227,11 +227,11 @@ int rfuse_io_mmap(struct vm_area_struct *vma, struct fuse_dev *fud, int req_inde
 	
 	rp = r_req->rp;
 	for(i = 0;i < rp->num_pages && nbytes; i++){
-		struct page *page = rp->pages[i];
+		struct folio *folio = rp->pages[i];
 		unsigned long size = (unsigned long)min(nbytes, rp->descs[i].length);
 		unsigned int offset = rp->descs[i].offset;
 		
-		void *mapaddr = kmap_atomic(page);
+		void *mapaddr = kmap_atomic(&folio->page);
 		void *buf = mapaddr + offset;
 		unsigned long pfn = virt_to_phys(buf) >> PAGE_SHIFT;
 		
@@ -1269,14 +1269,14 @@ static int rfuse_copy_do(struct rfuse_copy_state *rcs, void **val, unsigned *siz
 	return ncpy;
 }
 
-static int rfuse_try_move_page(struct rfuse_copy_state *rcs, struct page **pagep)
+static int rfuse_try_move_page(struct rfuse_copy_state *rcs, struct folio **foliop)
 {
 	int err;
-	struct page *oldpage = *pagep;
-	struct page *newpage;
+	struct folio *oldfolio = *foliop;
+	struct folio *newfolio;
 	struct pipe_buffer *buf = rcs->pipebufs;
 
-	get_page(oldpage);
+	get_page(&oldfolio->page);
 	err = rfuse_unlock_request(rcs->r_req);
 	if (err)
 		goto out_put_old;
@@ -1299,63 +1299,63 @@ static int rfuse_try_move_page(struct rfuse_copy_state *rcs, struct page **pagep
 	if (!pipe_buf_try_steal(rcs->pipe, buf))
 		goto out_fallback;
 
-	newpage = buf->page;
+	newfolio = page_folio(buf->page);
 
-	if (!PageUptodate(newpage))
-		SetPageUptodate(newpage);
+	if (!PageUptodate(&newfolio->page))
+		SetPageUptodate(&newfolio->page);
 
-  clear_bit(PG_mappedtodisk, &newpage->flags);
+  clear_bit(PG_mappedtodisk, &newfolio->page.flags);
 
-	if (rfuse_check_page(newpage) != 0)
+	if (rfuse_check_page(&newfolio->page) != 0)
 		goto out_fallback_unlock;
 
 	/*
 	 * This is a new and locked page, it shouldn't be mapped or
 	 * have any special flags on it
 	 */
-	if (WARN_ON(page_mapped(oldpage)))
+	if (WARN_ON(page_mapped(&oldfolio->page)))
 		goto out_fallback_unlock;
-	if (WARN_ON(folio_has_private(page_folio(oldpage))))
+	if (WARN_ON(folio_has_private(oldfolio)))
 		goto out_fallback_unlock;
-	if (WARN_ON(PageDirty(oldpage) || PageWriteback(oldpage)))
+	if (WARN_ON(PageDirty(&oldfolio->page) || PageWriteback(&oldfolio->page)))
 		goto out_fallback_unlock;
 	// if (WARN_ON(PageMlocked(oldpage)))
 	// 	goto out_fallback_unlock;
 
-	replace_page_cache_folio(page_folio(oldpage), page_folio(newpage));
+	replace_page_cache_folio(oldfolio, newfolio);
 
-	get_page(newpage);
+	get_page(&newfolio->page);
 
 	if (!(buf->flags & PIPE_BUF_FLAG_LRU))
-    folio_add_lru(page_folio(newpage));
+    folio_add_lru(newfolio);
 
 	err = 0;
 	spin_lock(&rcs->r_req->waitq.lock);
 	if (test_bit(FR_ABORTED, &rcs->r_req->flags))
 		err = -ENOENT;
 	else
-		*pagep = newpage;
+		*foliop = newfolio;
 	spin_unlock(&rcs->r_req->waitq.lock);
 
 	if (err) {
-		unlock_page(newpage);
-		put_page(newpage);
+		unlock_page(&newfolio->page);
+		put_page(&newfolio->page);
 		goto out_put_old;
 	}
 
-	unlock_page(oldpage);
+	unlock_page(&oldfolio->page);
 	/* Drop ref for ap->pages[] array */
-	put_page(oldpage);
+	put_page(&oldfolio->page);
 	rcs->len = 0;
 
 	err = 0;
 out_put_old:
 	/* Drop ref obtained in this function */
-	put_page(oldpage);
+	put_page(&oldfolio->page);
 	return err;
 
 out_fallback_unlock:
-	unlock_page(newpage);
+	unlock_page(&newfolio->page);
 out_fallback:
 	rcs->pg = buf->page;
 	rcs->offset = buf->offset;
@@ -1395,20 +1395,20 @@ static int rfuse_ref_page(struct rfuse_copy_state *rcs, struct page *page, unsig
 	return 0;
 }
 
-static int rfuse_copy_page(struct rfuse_copy_state *rcs, struct page **pagep,
+static int rfuse_copy_page(struct rfuse_copy_state *rcs, struct folio **pagep,
 		unsigned offset, unsigned count, int zeroing){
 
 	int err;
-	struct page *page = *pagep;
+	struct folio *folio = *pagep;
 	
-	if(page && zeroing && count < PAGE_SIZE)
-		clear_highpage(page);
+	if(folio && zeroing && count < PAGE_SIZE)
+		clear_highpage(&folio->page);
 	
 	while(count){
-		if (rcs->write && rcs->pipebufs && page) {
-			return rfuse_ref_page(rcs, page, offset, count);
+		if (rcs->write && rcs->pipebufs && folio) {
+			return rfuse_ref_page(rcs, &folio->page, offset, count);
 		} else if (!rcs->len) {
-			if (rcs->move_pages && page && offset == 0 && count == PAGE_SIZE) {
+			if (rcs->move_pages && folio && offset == 0 && count == PAGE_SIZE) {
 				err = rfuse_try_move_page(rcs, pagep);
 				if (err <= 0)
 					return err;
@@ -1418,16 +1418,16 @@ static int rfuse_copy_page(struct rfuse_copy_state *rcs, struct page **pagep,
 					return err;
 			}
 		}
-		if (page) {
-			void *mapaddr = kmap_atomic(page);
+		if (folio) {
+			void *mapaddr = kmap_atomic(&folio->page);
 			void *buf = mapaddr + offset;
 			offset += rfuse_copy_do(rcs, &buf, &count);
 			kunmap_atomic(mapaddr);
 		} else
 			offset += rfuse_copy_do(rcs, NULL, &count);
 	}
-	if(page && !rcs->write)
-		flush_dcache_page(page);
+	if(folio && !rcs->write)
+		flush_dcache_page(&folio->page);
 	return 0;
 }
 

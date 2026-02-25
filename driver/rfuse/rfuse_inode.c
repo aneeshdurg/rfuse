@@ -140,7 +140,7 @@ static void rfuse_process_init_reply(struct fuse_mount *fm, struct rfuse_req *r_
 			if ((arg->flags & FUSE_POSIX_ACL)) {
 				fc->default_permissions = 1;
 				fc->posix_acl = 1;
-				fm->sb->s_xattr = fuse_acl_xattr_handlers;
+				fm->sb->s_xattr = fuse_xattr_handlers;
 			}
 			if (arg->flags & FUSE_CACHE_SYMLINKS)
 				fc->cache_symlinks = 1;

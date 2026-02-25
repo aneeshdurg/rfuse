@@ -230,7 +230,7 @@ int rfuse_do_getattr(struct inode *inode, struct kstat *stat, struct file *file)
 			err = -EIO;
 		}
 		else{
-			fuse_change_attributes(inode, &outarg->attr,rfuse_attr_timeout(outarg),attr_version);
+			fuse_change_attributes(inode, &outarg->attr, NULL, rfuse_attr_timeout(outarg),attr_version);
 			if(stat)
 				rfuse_fillattr(inode, &outarg->attr,stat);
 		}
@@ -262,6 +262,11 @@ static void rfuse_lookup_init(struct fuse_mount *fm, struct rfuse_req *r_req, u6
 	r_req->out.arglen = sizeof(struct fuse_entry_out);
 }
 
+static u64 entry_attr_timeout(struct fuse_entry_out *o)
+{
+	return fuse_time_to_jiffies(o->attr_valid, o->attr_valid_nsec);
+}
+
 int rfuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *name, struct rfuse_req *r_req, struct inode **inode){
 	struct fuse_mount *fm = get_fuse_mount_super(sb);
 	struct rfuse_iqueue *riq = rfuse_get_specific_iqueue(fm->fc, r_req->riq_id);
@@ -289,9 +294,10 @@ int rfuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *nam
 		goto out;	
 	if (fuse_invalid_attr(&outarg->attr))
 		goto out;	
+	u64 evict_ctr = fuse_get_evict_ctr(fm->fc);
 	*inode = fuse_iget(sb, outarg->nodeid, outarg->generation,
 			   &outarg->attr, entry_attr_timeout(outarg),
-			   attr_version);
+			   attr_version, evict_ctr);
 	err = -ENOMEM;
 	if (!*inode) { // queue the forget to the forget queue
 		rfuse_queue_forget(fm->fc, outarg->nodeid, 1);
@@ -432,7 +438,7 @@ int rfuse_dentry_revalidate(struct dentry *entry, unsigned int flags){
 
 
 		forget_all_cached_acls(inode);
-		fuse_change_attributes(inode, &outarg->attr,
+		fuse_change_attributes(inode, &outarg->attr, NULL,
 				       entry_attr_timeout(outarg),
 				       attr_version);
 		fuse_change_entry_timeout(entry, outarg);
@@ -596,7 +602,7 @@ int rfuse_do_setattr(struct dentry *dentry, struct iattr *attr, struct file *fil
 		/* FIXME: clear I_DIRTY_SYNC? */
 	}
 
-	fuse_change_attributes_common(inode, &outarg->attr, rfuse_attr_timeout(outarg)); 
+	fuse_change_attributes_common(inode, &outarg->attr, NULL, rfuse_attr_timeout(outarg), fuse_get_cache_mask(inode), 0);
 	oldsize = inode->i_size;
 	/* see the comment in fuse_change_attributes() */
 	if (!is_wb || is_truncate || !S_ISREG(inode->i_mode))
@@ -716,8 +722,10 @@ static int rfuse_create_new_entry(struct fuse_mount *fm, struct rfuse_req *r_req
 	if ((outarg->attr.mode ^ mode) & S_IFMT)
 		goto out;
 
+	u64 attr_version = fuse_get_attr_version(fm->fc);
+	u64 evict_ctr = fuse_get_evict_ctr(fm->fc);
 	inode = fuse_iget(dir->i_sb, outarg->nodeid, outarg->generation,
-			  &outarg->attr, entry_attr_timeout(outarg), 0);
+			  &outarg->attr, entry_attr_timeout(outarg), attr_version, evict_ctr);
 
 	if (!inode) {
 		rfuse_queue_forget(fm->fc,outarg->nodeid,1);
@@ -742,7 +750,7 @@ out:
 }
 
 
-int rfuse_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
+int rfuse_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		      struct dentry *entry, umode_t mode)
 {
 	int err;
@@ -808,7 +816,7 @@ int rfuse_create_open(struct inode *dir, struct dentry *entry,
 	// 	goto out_err;
 
 	err = -ENOMEM;
-	ff = fuse_file_alloc(fm);
+	ff = fuse_file_alloc(fm, true);
 	if (!ff)
 		goto out_put_forget_req;
 
@@ -860,8 +868,10 @@ int rfuse_create_open(struct inode *dir, struct dentry *entry,
 	ff->fh = outopen->fh;
 	ff->nodeid = outentry->nodeid;
 	ff->open_flags = outopen->open_flags;
+	u64 attr_version = fuse_get_attr_version(fm->fc);
+	u64 evict_ctr = fuse_get_evict_ctr(fm->fc);
 	inode = fuse_iget(dir->i_sb, outentry->nodeid, outentry->generation,
-			  &outentry->attr, entry_attr_timeout(outentry), 0);
+			  &outentry->attr, entry_attr_timeout(outentry), attr_version, evict_ctr);
 	if (!inode) {
 		flags &= ~(O_CREAT | O_EXCL | O_TRUNC);
 		rfuse_sync_release(NULL, ff, flags);		
@@ -1094,7 +1104,7 @@ int rfuse_rename_common(struct inode *olddir, struct dentry *oldent,
 
 /************ 9. LINK  ************/
 
-int rfuse_symlink(struct user_namespace *mnt_userns, struct inode *dir,
+int rfuse_symlink(struct mnt_idmap *mnt_idmap, struct inode *dir,
 			struct dentry *entry, const char *link)
 {
 	int err;
@@ -1183,10 +1193,11 @@ int rfuse_link(struct dentry *entry, struct inode *newdir,
 int rfuse_readlink_page(struct inode *inode, struct page *page)
 {
 	struct fuse_mount *fm = get_fuse_mount(inode);
-	struct fuse_page_desc desc = { .length = PAGE_SIZE - 1 };
+	struct fuse_folio_desc desc = { .length = PAGE_SIZE - 1 };
+  struct folio* f = page_folio(page);
 	struct rfuse_pages rp = {
 		.num_pages = 1,
-		.pages = &page,
+		.pages = &f,
 		.descs = &desc,
 	};
 	char *link;
