@@ -31,7 +31,7 @@
 
 
 MODULE_ALIAS_MISCDEV(FUSE_MINOR);
-MODULE_ALIAS("devname:fuse");
+MODULE_ALIAS("devname:rfuse");
 
 static struct kmem_cache *fuse_req_cachep;
 
@@ -966,7 +966,7 @@ static int fuse_check_folio(struct folio *folio)
 	       1 << PG_reclaim |
 	       1 << PG_waiters |
 	       LRU_GEN_MASK | LRU_REFS_MASK))) {
-		dump_page(&folio->page, "fuse: trying to steal weird page");
+		dump_page(&folio->page, "rfuse: trying to steal weird page");
 		return 1;
 	}
 	return 0;
@@ -2748,7 +2748,7 @@ static void fuse_dev_show_fdinfo(struct seq_file *seq, struct file *file)
 	if (!fud)
 		return;
 
-	seq_printf(seq, "fuse_connection:\t%u\n", fud->fc->dev);
+	seq_printf(seq, "rfuse_connection:\t%u\n", fud->fc->dev);
 }
 #endif
 
@@ -2821,27 +2821,33 @@ const struct file_operations fuse_dev_operations = {
 EXPORT_SYMBOL_GPL(fuse_dev_operations);
 
 static struct miscdevice fuse_miscdevice = {
-	.minor = FUSE_MINOR,
-	.name  = "fuse",
+	.minor = MISC_DYNAMIC_MINOR,
+	.name  = "rfuse",
 	.fops = &fuse_dev_operations,
 };
 
 int __init fuse_dev_init(void)
 {
+  pr_info("fuse_dev_init 0\n");
 	int err = -ENOMEM;
-	fuse_req_cachep = kmem_cache_create("fuse_request",
+  pr_info("fuse_dev_init 1\n");
+	fuse_req_cachep = kmem_cache_create("rfuse_request",
 			sizeof(struct fuse_req),
 			0, 0, NULL);
+  pr_info("fuse_dev_init 2\n");
 	if (!fuse_req_cachep)
 		goto out;
 
+  pr_info("fuse_dev_init 3\n");
 	err = misc_register(&fuse_miscdevice);
 	if (err)
 		goto out_cache_clean;
 
+  pr_info("fuse_dev_init 4\n");
 	return 0;
 
 out_cache_clean:
+  pr_info("fuse_dev_init 5 %d\n", err);
 	kmem_cache_destroy(fuse_req_cachep);
 out:
 	return err;

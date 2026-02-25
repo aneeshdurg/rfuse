@@ -619,7 +619,7 @@ static int fuse_uring_args_to_ring(struct fuse_ring *ring, struct fuse_req *req,
 
 	err = import_ubuf(ITER_DEST, ent->payload, ring->max_payload_sz, &iter);
 	if (err) {
-		pr_info_ratelimited("fuse: Import of user buffer failed\n");
+		pr_info_ratelimited("rfuse: Import of user buffer failed\n");
 		return err;
 	}
 
@@ -1093,7 +1093,7 @@ static int fuse_uring_register(struct io_uring_cmd *cmd,
 	}
 
 	if (qid >= ring->nr_queues) {
-		pr_info_ratelimited("fuse: Invalid ring qid %u\n", qid);
+		pr_info_ratelimited("rfuse: Invalid ring qid %u\n", qid);
 		return -EINVAL;
 	}
 

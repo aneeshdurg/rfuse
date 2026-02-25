@@ -11,7 +11,7 @@
 #define _FS_FUSE_I_H
 
 #ifndef pr_fmt
-# define pr_fmt(fmt) "fuse: " fmt
+# define pr_fmt(fmt) "rfuse: " fmt
 #endif
 
 #include <linux/fuse.h>

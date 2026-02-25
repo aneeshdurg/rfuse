@@ -1854,15 +1854,18 @@ static const struct fs_context_operations fuse_context_ops = {
  */
 static int fuse_init_fs_context(struct fs_context *fsc)
 {
+  pr_info(" fuse_init_fs_context 0\n");
 	struct fuse_fs_context *ctx;
 	ctx = kzalloc(sizeof(struct fuse_fs_context), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 
+  pr_info(" fuse_init_fs_context 1\n");
 	ctx->max_read = ~0;
 	ctx->blksize = FUSE_DEFAULT_BLKSIZE;
 	ctx->legacy_opts_show = true;
 
+  pr_info(" fuse_init_fs_context 2\n");
 #ifdef CONFIG_BLOCK
 	if (fsc->fs_type == &fuseblk_fs_type) {
 		ctx->is_bdev = true;
@@ -1870,6 +1873,7 @@ static int fuse_init_fs_context(struct fs_context *fsc)
 	}
 #endif
 
+  pr_info(" fuse_init_fs_context 3\n");
 	fsc->fs_private = ctx;
 	fsc->ops = &fuse_context_ops;
 	return 0;
@@ -1955,7 +1959,7 @@ static void fuse_kill_sb_blk(struct super_block *sb)
 
 static struct file_system_type fuseblk_fs_type = {
 	.owner		= THIS_MODULE,
-	.name		= "fuseblk",
+	.name		= "rfuseblk",
 	.init_fs_context = fuse_init_fs_context,
 	.parameters	= fuse_fs_parameters,
 	.kill_sb	= fuse_kill_sb_blk,
@@ -1994,6 +1998,7 @@ static int __init fuse_fs_init(void)
 {
 	int err;
 
+  pr_info(" fuse_fs_init 0\n");
 	fuse_inode_cachep = kmem_cache_create("fuse_inode",
 			sizeof(struct fuse_inode), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_ACCOUNT|SLAB_RECLAIM_ACCOUNT,
@@ -2002,14 +2007,17 @@ static int __init fuse_fs_init(void)
 	if (!fuse_inode_cachep)
 		goto out;
 
+  pr_info(" fuse_fs_init 1\n");
 	err = register_fuseblk();
 	if (err)
 		goto out2;
 
+  pr_info(" fuse_fs_init 2\n");
 	err = register_filesystem(&fuse_fs_type);
 	if (err)
 		goto out3;
 
+  pr_info(" fuse_fs_init 3\n");
 	err = fuse_sysctl_register();
 	if (err)
 		goto out4;
@@ -2017,10 +2025,13 @@ static int __init fuse_fs_init(void)
 	return 0;
 
  out4:
+  pr_info(" fuse_fs_init 4\n");
 	unregister_filesystem(&fuse_fs_type);
  out3:
+  pr_info(" fuse_fs_init 5\n");
 	unregister_fuseblk();
  out2:
+  pr_info(" fuse_fs_init 6\n");
 	kmem_cache_destroy(fuse_inode_cachep);
  out:
 	return err;
@@ -2078,22 +2089,27 @@ static int __init fuse_init(void)
 		FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION);
 
 	INIT_LIST_HEAD(&fuse_conn_list);
+  pr_info("?!?! 0\n");
 	res = fuse_fs_init();
 	if (res)
 		goto err;
 
+  pr_info("?!?! 1\n");
 	res = fuse_dev_init();
 	if (res)
 		goto err_fs_cleanup;
 
-	res = fuse_sysfs_init();
-	if (res)
-		goto err_dev_cleanup;
+  pr_info("?!?! 2\n");
+	// res = fuse_sysfs_init();
+	// if (res)
+	//  	goto err_dev_cleanup;
 
+  pr_info("?!?! 3\n");
 	res = fuse_ctl_init();
 	if (res)
 		goto err_sysfs_cleanup;
 
+  pr_info("?!?! 4\n");
 	sanitize_global_limit(&max_user_bgreq);
 	sanitize_global_limit(&max_user_congthresh);
 
@@ -2114,7 +2130,7 @@ static void __exit fuse_exit(void)
 	pr_debug("exit\n");
 
 	fuse_ctl_cleanup();
-	fuse_sysfs_cleanup();
+	// fuse_sysfs_cleanup();
 	fuse_fs_cleanup();
 	fuse_dev_cleanup();
 }

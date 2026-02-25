@@ -110,7 +110,7 @@ static int rfuse_check_page(struct page *page)
 				 1 << PG_workingset |
 				 1 << PG_reclaim |
 				 1 << PG_waiters))) {
-		dump_page(page, "fuse: trying to steal weird page");
+		dump_page(page, "rfuse: trying to steal weird page");
 		return 1;
 	}
 	return 0;

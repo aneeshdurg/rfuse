@@ -9,8 +9,8 @@ ccflags-y = -I$(src)
 # Uncomment below line to compile with debug option 
 # ccflags-y += -DDEBUG
 
-obj-m += fuse.o
-fuse-y := dev.o dir.o file.o inode.o control.o xattr.o acl.o readdir.o ioctl.o rfuse_dev.o rfuse_dir.o rfuse_inode.o rfuse_file.o rfuse_comp.o iomode.o
+obj-m += rfuse.o
+rfuse-y := dev.o dir.o file.o inode.o control.o xattr.o acl.o readdir.o ioctl.o rfuse_dev.o rfuse_dir.o rfuse_inode.o rfuse_file.o rfuse_comp.o iomode.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

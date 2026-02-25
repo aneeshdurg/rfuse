@@ -291,7 +291,7 @@ out:
 static void dmap_reinit_add_to_free_pool(struct fuse_conn_dax *fcd,
 					    struct fuse_dax_mapping *dmap)
 {
-	pr_debug("fuse: freeing memory range start_idx=0x%lx end_idx=0x%lx window_offset=0x%llx length=0x%llx\n",
+	pr_debug("rfuse: freeing memory range start_idx=0x%lx end_idx=0x%lx window_offset=0x%llx length=0x%llx\n",
 		 dmap->itn.start, dmap->itn.last, dmap->window_offset,
 		 dmap->length);
 	__dmap_remove_busy_list(fcd, dmap);
@@ -837,7 +837,7 @@ static int dmap_writeback_invalidate(struct inode *inode,
 
 	ret = filemap_fdatawrite_range(inode->i_mapping, start_pos, end_pos);
 	if (ret) {
-		pr_debug("fuse: filemap_fdatawrite_range() failed. err=%d start_pos=0x%llx, end_pos=0x%llx\n",
+		pr_debug("rfuse: filemap_fdatawrite_range() failed. err=%d start_pos=0x%llx, end_pos=0x%llx\n",
 			 ret, start_pos, end_pos);
 		return ret;
 	}
@@ -846,7 +846,7 @@ static int dmap_writeback_invalidate(struct inode *inode,
 					    start_pos >> PAGE_SHIFT,
 					    end_pos >> PAGE_SHIFT);
 	if (ret)
-		pr_debug("fuse: invalidate_inode_pages2_range() failed err=%d\n",
+		pr_debug("rfuse: invalidate_inode_pages2_range() failed err=%d\n",
 			 ret);
 
 	return ret;
@@ -939,7 +939,7 @@ inode_inline_reclaim_one_dmap(struct fuse_conn_dax *fcd, struct inode *inode,
 	 */
 	ret = fuse_dax_break_layouts(inode, dmap_start, dmap_end);
 	if (ret) {
-		pr_debug("fuse: fuse_dax_break_layouts() failed. err=%d\n",
+		pr_debug("rfuse: fuse_dax_break_layouts() failed. err=%d\n",
 			 ret);
 		dmap = ERR_PTR(ret);
 		goto out_mmap_sem;
@@ -974,7 +974,7 @@ inode_inline_reclaim_one_dmap(struct fuse_conn_dax *fcd, struct inode *inode,
 	dmap->inode = NULL;
 	dmap->itn.start = dmap->itn.last = 0;
 
-	pr_debug("fuse: %s: inline reclaimed memory range. inode=%p, window_offset=0x%llx, length=0x%llx\n",
+	pr_debug("rfuse: %s: inline reclaimed memory range. inode=%p, window_offset=0x%llx, length=0x%llx\n",
 		 __func__, inode, dmap->window_offset, dmap->length);
 
 out_write_dmap_sem:
@@ -1162,7 +1162,7 @@ static void fuse_dax_free_mem_worker(struct work_struct *work)
 						 free_work.work);
 	ret = try_to_free_dmap_chunks(fcd, FUSE_DAX_RECLAIM_CHUNK);
 	if (ret) {
-		pr_debug("fuse: try_to_free_dmap_chunks() failed with err=%d\n",
+		pr_debug("rfuse: try_to_free_dmap_chunks() failed with err=%d\n",
 			 ret);
 	}
 
@@ -1336,7 +1336,7 @@ void fuse_dax_dontcache(struct inode *inode, unsigned int flags)
 bool fuse_dax_check_alignment(struct fuse_conn *fc, unsigned int map_alignment)
 {
 	if (fc->dax && (map_alignment > FUSE_DAX_SHIFT)) {
-		pr_warn("FUSE: map_alignment %u incompatible with dax mem range size %u\n",
+		pr_warn("rFUSE: map_alignment %u incompatible with dax mem range size %u\n",
 			map_alignment, FUSE_DAX_SZ);
 		return false;
 	}
