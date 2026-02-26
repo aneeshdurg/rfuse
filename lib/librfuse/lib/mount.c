@@ -176,7 +176,7 @@ static void set_mount_flag(const char *s, int *flags)
 			return;
 		}
 	}
-	fuse_log(FUSE_LOG_ERR, "fuse: internal error, can't find mount flag\n");
+	fuse_log(FUSE_LOG_ERR, "rfuse: internal error, can't find mount flag\n");
 	abort();
 }
 
@@ -282,7 +282,7 @@ void fuse_kern_unmount(const char *mountpoint, int fd)
 	}
 
 	if (geteuid() == 0) {
-		fuse_mnt_umount("fuse", mountpoint, mountpoint,  1);
+		fuse_mnt_umount("rfuse", mountpoint, mountpoint,  1);
 		return;
 	}
 
@@ -311,19 +311,19 @@ static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
 	int rv;
 
 	if (!mountpoint) {
-		fuse_log(FUSE_LOG_ERR, "fuse: missing mountpoint parameter\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: missing mountpoint parameter\n");
 		return -1;
 	}
 
 	res = socketpair(PF_UNIX, SOCK_STREAM, 0, fds);
 	if(res == -1) {
-		perror("fuse: socketpair() failed");
+		perror("rfuse: socketpair() failed");
 		return -1;
 	}
 
 	pid = fork();
 	if(pid == -1) {
-		perror("fuse: fork() failed");
+		perror("rfuse: fork() failed");
 		close(fds[0]);
 		close(fds[1]);
 		return -1;
@@ -356,7 +356,7 @@ static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
 		snprintf(env, sizeof(env), "%i", fds[0]);
 		setenv(FUSE_COMMFD_ENV, env, 1);
 		exec_fusermount(argv);
-		perror("fuse: failed to exec fusermount3");
+		perror("rfuse: failed to exec fusermount3");
 		_exit(1);
 	}
 
@@ -384,7 +384,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 			  const char *mnt_opts)
 {
 	char tmp[128];
-	const char *devname = "/dev/fuse";
+	const char *devname = "/dev/rfuse";
 	char *source = NULL;
 	char *type = NULL;
 	struct stat stbuf;
@@ -392,13 +392,13 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	int res;
 
 	if (!mnt) {
-		fuse_log(FUSE_LOG_ERR, "fuse: missing mountpoint parameter\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: missing mountpoint parameter\n");
 		return -1;
 	}
 
 	res = stat(mnt, &stbuf);
 	if (res == -1) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to access mountpoint %s: %s\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to access mountpoint %s: %s\n",
 			mnt, strerror(errno));
 		return -1;
 	}
@@ -412,9 +412,9 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	fd = open(devname, O_RDWR | O_CLOEXEC);
 	if (fd == -1) {
 		if (errno == ENODEV || errno == ENOENT)
-			fuse_log(FUSE_LOG_ERR, "fuse: device not found, try 'modprobe fuse' first\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: device not found, try 'modprobe rfuse' first\n");
 		else
-			fuse_log(FUSE_LOG_ERR, "fuse: failed to open %s: %s\n",
+			fuse_log(FUSE_LOG_ERR, "rfuse: failed to open %s: %s\n",
 				devname, strerror(errno));
 		return -1;
 	}
@@ -434,11 +434,11 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 
 	type = malloc((mo->subtype ? strlen(mo->subtype) : 0) + 32);
 	if (!type || !source) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate memory\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate memory\n");
 		goto out_close;
 	}
 
-	strcpy(type, mo->blkdev ? "fuseblk" : "fuse");
+	strcpy(type, mo->blkdev ? "rfuseblk" : "rfuse");
 	if (mo->subtype) {
 		strcat(type, ".");
 		strcat(type, mo->subtype);
@@ -449,7 +449,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	res = mount(source, mnt, type, mo->flags, mo->kernel_opts);
 	if (res == -1 && errno == ENODEV && mo->subtype) {
 		/* Probably missing subtype support */
-		strcpy(type, mo->blkdev ? "fuseblk" : "fuse");
+		strcpy(type, mo->blkdev ? "rfuseblk" : "rfuse");
 		if (mo->fsname) {
 			if (!mo->blkdev)
 				sprintf(source, "%s#%s", mo->subtype,
@@ -471,9 +471,9 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 			if (mo->blkdev && errno == ENODEV &&
 			    !fuse_mnt_check_fuseblk())
 				fuse_log(FUSE_LOG_ERR,
-					"fuse: 'fuseblk' support missing\n");
+					"rfuse: 'rfuseblk' support missing\n");
 			else
-				fuse_log(FUSE_LOG_ERR, "fuse: mount failed: %s\n",
+				fuse_log(FUSE_LOG_ERR, "rfuse: mount failed: %s\n",
 					strerror(errno_save));
 		}
 
@@ -482,12 +482,12 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	
 #ifndef IGNORE_MTAB
 	if (geteuid() == 0) {
-		char *newmnt = fuse_mnt_resolve_path("fuse", mnt);
+		char *newmnt = fuse_mnt_resolve_path("rfuse", mnt);
 		res = -1;
 		if (!newmnt)
 			goto out_umount;
 
-		res = fuse_mnt_add_mount("fuse", source, newmnt, type,
+		res = fuse_mnt_add_mount("rfuse", source, newmnt, type,
 					 mnt_opts);
 		free(newmnt);
 		if (res == -1)

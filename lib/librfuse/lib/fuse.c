@@ -216,12 +216,12 @@ static int fuse_register_module(const char *name,
 
 	mod = calloc(1, sizeof(struct fuse_module));
 	if (!mod) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate module\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate module\n");
 		return -1;
 	}
 	mod->name = strdup(name);
 	if (!mod->name) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate module name\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate module name\n");
 		free(mod);
 		return -1;
 	}
@@ -258,19 +258,19 @@ static int fuse_load_so_module(const char *module)
 
 	tmp = malloc(strlen(module) + 64);
 	if (!tmp) {
-		fuse_log(FUSE_LOG_ERR, "fuse: memory allocation failed\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: memory allocation failed\n");
 		return -1;
 	}
 	sprintf(tmp, "libfusemod_%s.so", module);
 	so = calloc(1, sizeof(struct fusemod_so));
 	if (!so) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate module so\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate module so\n");
 		goto out;
 	}
 
 	so->handle = dlopen(tmp, RTLD_NOW);
 	if (so->handle == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: dlopen(%s) failed: %s\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: dlopen(%s) failed: %s\n",
 			tmp, dlerror());
 		goto out_free_so;
 	}
@@ -278,7 +278,7 @@ static int fuse_load_so_module(const char *module)
 	sprintf(tmp, "fuse_module_%s_factory", module);
 	*(void**)(&factory) = dlsym(so->handle, tmp);
 	if (factory == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: symbol <%s> not found in module: %s\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: symbol <%s> not found in module: %s\n",
 			tmp, dlerror());
 		goto out_dlclose;
 	}
@@ -1482,7 +1482,7 @@ static int rename_node(struct fuse *f, fuse_ino_t olddir, const char *oldname,
 
 	if (newnode != NULL) {
 		if (hide) {
-			fuse_log(FUSE_LOG_ERR, "fuse: hidden file got created during hiding\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: hidden file got created during hiding\n");
 			err = -EBUSY;
 			goto out;
 		}
@@ -1830,7 +1830,7 @@ int fuse_fs_read_buf(struct fuse_fs *fs, const char *path,
 				fuse_buf_size(*bufp),
 				(unsigned long long) off);
 		if (res >= 0 && fuse_buf_size(*bufp) > size)
-			fuse_log(FUSE_LOG_ERR, "fuse: read too many bytes\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: read too many bytes\n");
 
 		if (res < 0)
 			return res;
@@ -1875,7 +1875,7 @@ int fuse_fs_read(struct fuse_fs *fs, const char *path, char *mem, size_t size,
 				res,
 				(unsigned long long) off);
 		if (res >= 0 && res > (int) size)
-			fuse_log(FUSE_LOG_ERR, "fuse: read too many bytes\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: read too many bytes\n");
 
 		return res;
 	} else {
@@ -1939,7 +1939,7 @@ out:
 				(unsigned long long) fi->fh, res,
 				(unsigned long long) off);
 		if (res > (int) size)
-			fuse_log(FUSE_LOG_ERR, "fuse: wrote too many bytes\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: wrote too many bytes\n");
 
 		return res;
 	} else {
@@ -2491,7 +2491,7 @@ static void curr_time(struct timespec *now)
 		res = clock_gettime(clockid, now);
 	}
 	if (res == -1) {
-		perror("fuse: clock_gettime");
+		perror("rfuse: clock_gettime");
 		abort();
 	}
 }
@@ -2563,7 +2563,7 @@ static struct fuse_context_i *fuse_create_context(struct fuse *f)
 			   abort.  If memory is so low that the
 			   context cannot be allocated, there's not
 			   much hope for the filesystem anyway */
-			fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate thread specific data\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate thread specific data\n");
 			abort();
 		}
 		pthread_setspecific(fuse_context_key, c);
@@ -2587,7 +2587,7 @@ static int fuse_create_context_key(void)
 	if (!fuse_context_ref) {
 		err = pthread_key_create(&fuse_context_key, fuse_freecontext);
 		if (err) {
-			fuse_log(FUSE_LOG_ERR, "fuse: failed to create thread specific key: %s\n",
+			fuse_log(FUSE_LOG_ERR, "rfuse: failed to create thread specific key: %s\n",
 				strerror(err));
 			pthread_mutex_unlock(&fuse_context_lock);
 			return -1;
@@ -4760,7 +4760,7 @@ static int fuse_init_intr_signal(int signum, int *installed)
 	struct sigaction old_sa;
 
 	if (sigaction(signum, NULL, &old_sa) == -1) {
-		perror("fuse: cannot get old signal handler");
+		perror("rfuse: cannot get old signal handler");
 		return -1;
 	}
 
@@ -4772,7 +4772,7 @@ static int fuse_init_intr_signal(int signum, int *installed)
 		sigemptyset(&sa.sa_mask);
 
 		if (sigaction(signum, &sa, NULL) == -1) {
-			perror("fuse: cannot set interrupt signal handler");
+			perror("rfuse: cannot set interrupt signal handler");
 			return -1;
 		}
 		*installed = 1;
@@ -4816,13 +4816,13 @@ struct fuse_fs *fuse_fs_new(const struct fuse_operations *op, size_t op_size,
 	struct fuse_fs *fs;
 
 	if (sizeof(struct fuse_operations) < op_size) {
-		fuse_log(FUSE_LOG_ERR, "fuse: warning: library too old, some operations may not not work\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: warning: library too old, some operations may not not work\n");
 		op_size = sizeof(struct fuse_operations);
 	}
 
 	fs = (struct fuse_fs *) calloc(1, sizeof(struct fuse_fs));
 	if (!fs) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate fuse_fs object\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate fuse_fs object\n");
 		return NULL;
 	}
 
@@ -4837,7 +4837,7 @@ static int node_table_init(struct node_table *t)
 	t->size = NODE_TABLE_MIN_SIZE;
 	t->array = (struct node **) calloc(1, sizeof(struct node *) * t->size);
 	if (t->array == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: memory allocation failed\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: memory allocation failed\n");
 		return -1;
 	}
 	t->use = 0;
@@ -4890,7 +4890,7 @@ struct fuse *fuse_new_31(struct fuse_args *args,
 
 	f = (struct fuse *) calloc(1, sizeof(struct fuse));
 	if (f == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate fuse object\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate fuse object\n");
 		goto out;
 	}
 
@@ -4985,7 +4985,7 @@ struct fuse *fuse_new_31(struct fuse_args *args,
 
 	root = alloc_node(f);
 	if (root == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: memory allocation failed\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: memory allocation failed\n");
 		goto out_free_id_table;
 	}
 	if (lru_enabled(f)) {

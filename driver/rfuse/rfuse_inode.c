@@ -87,7 +87,9 @@ static void rfuse_process_init_reply(struct fuse_mount *fm, struct rfuse_req *r_
 	bool ok = true;
 
 	printk("RFUSE: rfuse_process_init_reply Start\n");
-	if (error || arg->major != FUSE_KERNEL_VERSION)
+  pr_info("  error = %d\n", error);
+  pr_info("  arg->major = %d FUSE_KERNEL_VERSION = %d\n", arg->major, FUSE_KERNEL_VERSION);
+	if (error)// || arg->major != FUSE_KERNEL_VERSION)
 		ok = false;
 	else {
 		unsigned long ra_pages;

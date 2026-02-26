@@ -31,7 +31,7 @@
 #include <limits.h>
 
 #define FUSERMOUNT_PROG		"mount_fusefs"
-#define FUSE_DEV_TRUNK		"/dev/fuse"
+#define FUSE_DEV_TRUNK		"/dev/rfuse"
 
 enum {
 	KEY_RO,
@@ -180,7 +180,7 @@ static int fuse_mount_core(const char *mountpoint, const char *opts)
 		dev = (char *)FUSE_DEV_TRUNK;
 
 	if ((fd = open(dev, O_RDWR)) < 0) {
-		perror("fuse: failed to open fuse device");
+		perror("rfuse: failed to open fuse device");
 		return -1;
 	}
 
@@ -192,7 +192,7 @@ mount:
 	cpid = pid;
 
 	if (pid == -1) {
-		perror("fuse: fork() failed");
+		perror("rfuse: fork() failed");
 		close(fd);
 		return -1;
 	}
@@ -208,7 +208,7 @@ mount:
 			pid = fork();
 
 			if (pid == -1) {
-				perror("fuse: fork() failed");
+				perror("rfuse: fork() failed");
 				close(fd);
 				exit(1);
 			}
@@ -224,7 +224,7 @@ mount:
 				ret = asprintf(&fdnam, "%d", fd); 
 				if(ret == -1)
 				{
-					perror("fuse: failed to assemble mount arguments");
+					perror("rfuse: failed to assemble mount arguments");
 					close(fd);
 					exit(1);
 				}
@@ -239,7 +239,7 @@ mount:
 			argv[a++] = mountpoint;
 			argv[a++] = NULL;
 			execvp(mountprog, (char **) argv);
-			perror("fuse: failed to exec mount program");
+			perror("rfuse: failed to exec mount program");
 			free(fdnam);
 			exit(1);
 		}
@@ -248,7 +248,7 @@ mount:
 	}
 
 	if (waitpid(cpid, &status, 0) == -1 || WEXITSTATUS(status) != 0) {
-		perror("fuse: failed to mount file system");
+		perror("rfuse: failed to mount file system");
 		close(fd);
 		return -1;
 	}

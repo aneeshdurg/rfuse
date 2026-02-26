@@ -151,7 +151,7 @@ static struct fuse_req *fuse_ll_alloc_req(struct fuse_session *se)
 
 	req = (struct fuse_req *) calloc(1, sizeof(struct fuse_req));
 	if (req == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate request\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate request\n");
 	} else {
 		req->se = se;
 		req->ctr = 1;
@@ -196,7 +196,7 @@ static int fuse_send_msg(struct fuse_session *se, struct fuse_chan *ch, // RFUSE
 	if (res == -1) {
 		/* ENOENT means the operation was interrupted */
 		if (!fuse_session_exited(se) && err != ENOENT)
-			perror("fuse: writing device");
+			perror("rfuse: writing device");
 		return -err;
 	}
 
@@ -209,7 +209,7 @@ int fuse_send_reply_iov_nofree(old_fuse_req_t req, int error, struct iovec *iov,
 	struct fuse_out_header out;
 
 	if (error <= -1000 || error > 0) {
-		fuse_log(FUSE_LOG_ERR, "fuse: bad error value: %i\n",	error);
+		fuse_log(FUSE_LOG_ERR, "rfuse: bad error value: %i\n",	error);
 		error = -ERANGE;
 	}
 
@@ -600,11 +600,11 @@ static int read_back(int fd, char *buf, size_t len)
 
 	res = read(fd, buf, len);
 	if (res == -1) {
-		fuse_log(FUSE_LOG_ERR, "fuse: internal error: failed to read back from pipe: %s\n", strerror(errno));
+		fuse_log(FUSE_LOG_ERR, "rfuse: internal error: failed to read back from pipe: %s\n", strerror(errno));
 		return -EIO;
 	}
 	if (res != len) {
-		fuse_log(FUSE_LOG_ERR, "fuse: internal error: short read back from pipe: %i from %zi\n", res, len);
+		fuse_log(FUSE_LOG_ERR, "rfuse: internal error: short read back from pipe: %i from %zi\n", res, len);
 		return -EIO;
 	}
 	return 0;
@@ -711,7 +711,7 @@ static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 
 	if (res != headerlen) {
 		res = -EIO;
-		fuse_log(FUSE_LOG_ERR, "fuse: short vmsplice to pipe: %u/%zu\n", res,
+		fuse_log(FUSE_LOG_ERR, "rfuse: short vmsplice to pipe: %u/%zu\n", res,
 			headerlen);
 		goto clear_pipe;
 	}
@@ -818,12 +818,12 @@ static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 		     NULL, out->len, splice_flags);
 	if (res == -1) {
 		res = -errno;
-		perror("fuse: splice from pipe");
+		perror("rfuse: splice from pipe");
 		goto clear_pipe;
 	}
 	if (res != out->len) {
 		res = -EIO;
-		fuse_log(FUSE_LOG_ERR, "fuse: short splice from pipe: %u/%u\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: short splice from pipe: %u/%u\n",
 			res, out->len);
 		goto clear_pipe;
 	}
@@ -1401,7 +1401,7 @@ static void do_write_buf(old_fuse_req_t req, fuse_ino_t nodeid, const void *inar
 			sizeof(struct fuse_write_in);
 	}
 	if (bufv.buf[0].size < arg->size) {
-		fuse_log(FUSE_LOG_ERR, "fuse: do_write_buf: buffer size too small\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: do_write_buf: buffer size too small\n");
 		old_fuse_reply_err(req, EIO);
 		goto out;
 	}
@@ -1916,7 +1916,7 @@ void do_init(old_fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	outarg.minor = FUSE_KERNEL_MINOR_VERSION;
 
 	if (arg->major < 7) {
-		fuse_log(FUSE_LOG_ERR, "fuse: unsupported protocol version: %u.%u\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: unsupported protocol version: %u.%u\n",
 			arg->major, arg->minor);
 		old_fuse_reply_err(req, EPROTO);
 		return;
@@ -2017,7 +2017,7 @@ void do_init(old_fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	se->conn.time_gran = 1;
 	
 	if (bufsize < FUSE_MIN_READ_BUFFER) {
-		fuse_log(FUSE_LOG_ERR, "fuse: warning: buffer size too small: %zu\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: warning: buffer size too small: %zu\n",
 			bufsize);
 		bufsize = FUSE_MIN_READ_BUFFER;
 	}
@@ -2031,7 +2031,7 @@ void do_init(old_fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 		se->op.init(se->userdata, &se->conn);
 
 	if (se->conn.want & (~se->conn.capable)) {
-		fuse_log(FUSE_LOG_ERR, "fuse: error: filesystem requested capabilities "
+		fuse_log(FUSE_LOG_ERR, "rfuse: error: filesystem requested capabilities "
 			"0x%x that are not supported by kernel, aborting.\n",
 			se->conn.want & (~se->conn.capable));
 		old_fuse_reply_err(req, EPROTO);
@@ -2042,7 +2042,7 @@ void do_init(old_fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 
 	unsigned max_read_mo = get_max_read(se->mo);
 	if (se->conn.max_read != max_read_mo) {
-		fuse_log(FUSE_LOG_ERR, "fuse: error: init() and fuse_session_new() "
+		fuse_log(FUSE_LOG_ERR, "rfuse: error: init() and fuse_session_new() "
 			"requested different maximum read size (%u vs %u)\n",
 			se->conn.max_read, max_read_mo);
 		old_fuse_reply_err(req, EPROTO);
@@ -2357,7 +2357,7 @@ static void fuse_ll_retrieve_reply(struct fuse_notify_req *nreq,
 		sizeof(struct fuse_notify_retrieve_in);
 
 	if (bufv.buf[0].size < arg->size) {
-		fuse_log(FUSE_LOG_ERR, "fuse: retrieve reply: buffer size too small\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: retrieve reply: buffer size too small\n");
 		old_fuse_reply_none(req);
 		goto out;
 	}
@@ -2521,11 +2521,11 @@ static int fuse_ll_copy_from_pipe(struct fuse_bufvec *dst,
 {
 	ssize_t res = fuse_buf_copy(dst, src, 0);
 	if (res < 0) {
-		fuse_log(FUSE_LOG_ERR, "fuse: copy from pipe: %s\n", strerror(-res));
+		fuse_log(FUSE_LOG_ERR, "rfuse: copy from pipe: %s\n", strerror(-res));
 		return res;
 	}
 	if ((size_t)res < fuse_buf_size(dst)) {
-		fuse_log(FUSE_LOG_ERR, "fuse: copy from pipe: short read\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: copy from pipe: short read\n");
 		return -1;
 	}
 	return 0;
@@ -2558,7 +2558,7 @@ void fuse_session_process_buf_int(struct fuse_session *se,
 
 		mbuf = malloc(tmpbuf.buf[0].size);
 		if (mbuf == NULL) {
-			fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate header\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate header\n");
 			goto clear_pipe;
 		}
 		tmpbuf.buf[0].mem = mbuf;
@@ -2814,7 +2814,7 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 			return 0;
 		}
 		if (err != EINTR && err != EAGAIN)
-			perror("fuse: splice from device");
+			perror("rfuse: splice from device");
 		return -err;
 	}
 
@@ -2843,7 +2843,7 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 			buf->mem = malloc(se->bufsize);
 			if (!buf->mem) {
 				fuse_log(FUSE_LOG_ERR,
-					"fuse: failed to allocate read buffer\n");
+					"rfuse: failed to allocate read buffer\n");
 				return -ENOMEM;
 			}
 		}
@@ -2853,13 +2853,13 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 
 		res = fuse_buf_copy(&dst, &src, 0);
 		if (res < 0) {
-			fuse_log(FUSE_LOG_ERR, "fuse: copy from pipe: %s\n",
+			fuse_log(FUSE_LOG_ERR, "rfuse: copy from pipe: %s\n",
 				strerror(-res));
 			fuse_ll_clear_pipe(se);
 			return res;
 		}
 		if (res < tmpbuf.size) {
-			fuse_log(FUSE_LOG_ERR, "fuse: copy from pipe: short read\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: copy from pipe: short read\n");
 			fuse_ll_clear_pipe(se);
 			return -EIO;
 		}
@@ -2880,13 +2880,13 @@ fallback:
 		buf->mem = malloc(se->bufsize);
 		if (!buf->mem) {
 			fuse_log(FUSE_LOG_ERR,
-				"fuse: failed to allocate read buffer\n");
+				"rfuse: failed to allocate read buffer\n");
 			return -ENOMEM;
 		}
 	}
 
 restart:
-	//printf("rfuse: Read buffer from /dev/fuse\n");
+	//printf("rfuse: Read buffer from /dev/rfuse\n");
 	// clock_gettime(CLOCK_MONOTONIC, &start);
 	res = read(ch ? ch->fd : se->fd, buf->mem, se->bufsize);
 	// clock_gettime(CLOCK_MONOTONIC, &end);
@@ -2914,7 +2914,7 @@ restart:
 		   interrupted), EAGAIN (nonblocking I/O), ENODEV (filesystem
 		   umounted) */
 		if (err != EINTR && err != EAGAIN)
-			perror("fuse: reading device");
+			perror("rfuse: reading device");
 		return -err;
 	}
 	if ((size_t) res < sizeof(struct fuse_in_header)) {
@@ -2936,18 +2936,18 @@ struct fuse_session *fuse_session_new(struct fuse_args *args,
 	struct mount_opts *mo;
 
 	if (sizeof(struct fuse_lowlevel_ops) < op_size) {
-		fuse_log(FUSE_LOG_ERR, "fuse: warning: library too old, some operations may not work\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: warning: library too old, some operations may not work\n");
 		op_size = sizeof(struct fuse_lowlevel_ops);
 	}
 
 	if (args->argc == 0) {
-		fuse_log(FUSE_LOG_ERR, "fuse: empty argv passed to fuse_session_new().\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: empty argv passed to fuse_session_new().\n");
 		return NULL;
 	}
 
 	se = (struct fuse_session *) calloc(1, sizeof(struct fuse_session));
 	if (se == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate fuse object\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate fuse object\n");
 		goto out1;
 	}
 	se->fd = -1;
@@ -2973,11 +2973,11 @@ struct fuse_session *fuse_session_new(struct fuse_args *args,
 
 	if(args->argc == 1 &&
 	   args->argv[0][0] == '-') {
-		fuse_log(FUSE_LOG_ERR, "fuse: warning: argv[0] looks like an option, but "
+		fuse_log(FUSE_LOG_ERR, "rfuse: warning: argv[0] looks like an option, but "
 			"will be ignored\n");
 	} else if (args->argc != 1) {
 		int i;
-		fuse_log(FUSE_LOG_ERR, "fuse: unknown option(s): `");
+		fuse_log(FUSE_LOG_ERR, "rfuse: unknown option(s): `");
 		for(i = 1; i < args->argc-1; i++)
 			fuse_log(FUSE_LOG_ERR, "%s ", args->argv[i]);
 		fuse_log(FUSE_LOG_ERR, "%s'\n", args->argv[i]);
@@ -3010,7 +3010,7 @@ struct fuse_session *fuse_session_new(struct fuse_args *args,
 
 	err = pthread_key_create(&se->pipe_key, fuse_ll_pipe_destructor);
 	if (err) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to create thread specific key: %s\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to create thread specific key: %s\n",
 			strerror(err));
 		goto out5;
 	}
@@ -3053,7 +3053,7 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
 
 	/*
 	 * To allow FUSE daemons to run without privileges, the caller may open
-	 * /dev/fuse before launching the file system and pass on the file
+	 * /dev/rfuse before launching the file system and pass on the file
 	 * descriptor by specifying /dev/fd/N as the mount point. Note that the
 	 * parent process takes care of performing the mount in this case.
 	 */
@@ -3061,7 +3061,7 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
 	if (fd != -1) {
 		if (fcntl(fd, F_GETFD) == -1) {
 			fuse_log(FUSE_LOG_ERR,
-				"fuse: Invalid file descriptor /dev/fd/%u\n",
+				"rfuse: Invalid file descriptor /dev/fd/%u\n",
 				fd);
 			return -1;
 		}
@@ -3089,7 +3089,7 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
 			PROT_READ | PROT_WRITE, MAP_SHARED,
 			fd, RFUSE_IQUEUE | riq_id);
 		if(riq[i] == MAP_FAILED) {
-			fuse_log(FUSE_LOG_ERR, "fuse: failed to mmap rfuse_iqueue, errno: %d\n", errno);
+			fuse_log(FUSE_LOG_ERR, "rfuse: failed to mmap rfuse_iqueue, errno: %d\n", errno);
 			goto error_out;
 		}
 

@@ -28,7 +28,7 @@ static struct fuse_chan *rfuse_chan_new(int fd)
 {
 	struct fuse_chan *ch = (struct fuse_chan *) malloc(sizeof(*ch));
 	if (ch == NULL) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate channel\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate channel\n");
 		return NULL;
 	}
 
@@ -169,7 +169,7 @@ int rfuse_start_thread(pthread_t *thread_id, void *(*func)(void *), void *arg)
 	pthread_attr_init(&attr);
 	stack_size = getenv(ENVNAME_THREAD_STACK);
 	if (stack_size && pthread_attr_setstacksize(&attr, atoi(stack_size)))
-		fuse_log(FUSE_LOG_ERR, "fuse: invalid stack size: %s\n", stack_size);
+		fuse_log(FUSE_LOG_ERR, "rfuse: invalid stack size: %s\n", stack_size);
 
 	/* Disallow signal reception in worker threads */
 	sigemptyset(&newset);
@@ -182,7 +182,7 @@ int rfuse_start_thread(pthread_t *thread_id, void *(*func)(void *), void *arg)
 	pthread_sigmask(SIG_SETMASK, &oldset, NULL);
 	pthread_attr_destroy(&attr);
 	if (res != 0) {
-		fuse_log(FUSE_LOG_ERR, "fuse: error creating thread: %s\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: error creating thread: %s\n",
 			strerror(res));
 		return -1;
 	}
@@ -196,7 +196,7 @@ static struct fuse_chan *rfuse_clone_chan(struct rfuse_mt *mt)
 	int clonefd;
 	uint32_t masterfd;
 	struct fuse_chan *newch;
-	const char *devname = "/dev/fuse";
+	const char *devname = "/dev/rfuse";
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
@@ -230,7 +230,7 @@ int rfuse_loop_start_thread(struct rfuse_mt *mt)
 
 	struct rfuse_worker *w = malloc(sizeof(struct rfuse_worker));
 	if (!w) {
-		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate worker structure\n");
+		fuse_log(FUSE_LOG_ERR, "rfuse: failed to allocate worker structure\n");
 		return -1;
 	}
 	memset(w, 0, sizeof(struct rfuse_worker));
@@ -242,7 +242,7 @@ int rfuse_loop_start_thread(struct rfuse_mt *mt)
 	if (mt->clone_fd) {
 		w->ch = rfuse_clone_chan(mt);
 		if(!w->ch) {
-			fuse_log(FUSE_LOG_ERR, "fuse: trying to continue "
+			fuse_log(FUSE_LOG_ERR, "rfuse: trying to continue "
 				"without -o clone_fd.\n");
 			mt->clone_fd = 0;
 		}

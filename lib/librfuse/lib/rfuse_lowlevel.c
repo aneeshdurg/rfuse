@@ -865,7 +865,7 @@ void rfuse_do_init(fuse_req_t u_req, fuse_ino_t nodeid){
 	outarg->minor = FUSE_KERNEL_MINOR_VERSION;
 
 	if (arg->major < 7) {
-		fuse_log(FUSE_LOG_ERR, "fuse: unsupported protocol version: %u.%u\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: unsupported protocol version: %u.%u\n",
 			arg->major, arg->minor);
 		fuse_reply_err(u_req, EPROTO);
 		return;
@@ -964,7 +964,7 @@ void rfuse_do_init(fuse_req_t u_req, fuse_ino_t nodeid){
 	se->conn.time_gran = 1;
 	
 	if (bufsize < FUSE_MIN_READ_BUFFER) {
-		fuse_log(FUSE_LOG_ERR, "fuse: warning: buffer size too small: %zu\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: warning: buffer size too small: %zu\n",
 			bufsize);
 		bufsize = FUSE_MIN_READ_BUFFER;
 	}
@@ -978,7 +978,7 @@ void rfuse_do_init(fuse_req_t u_req, fuse_ino_t nodeid){
 		se->op.init(se->userdata, &se->conn);
 
 	if (se->conn.want & (~se->conn.capable)) {
-		fuse_log(FUSE_LOG_ERR, "fuse: error: filesystem requested capabilities "
+		fuse_log(FUSE_LOG_ERR, "rfuse: error: filesystem requested capabilities "
 			"0x%x that are not supported by kernel, aborting.\n",
 			se->conn.want & (~se->conn.capable));
 		fuse_reply_err(u_req, EPROTO);
@@ -989,7 +989,7 @@ void rfuse_do_init(fuse_req_t u_req, fuse_ino_t nodeid){
 
 	unsigned max_read_mo = get_max_read(se->mo);
 	if (se->conn.max_read != max_read_mo) {
-		fuse_log(FUSE_LOG_ERR, "fuse: error: init() and fuse_session_new() "
+		fuse_log(FUSE_LOG_ERR, "rfuse: error: init() and fuse_session_new() "
 			"requested different maximum read size (%u vs %u)\n",
 			se->conn.max_read, max_read_mo);
 		fuse_reply_err(u_req, EPROTO);
@@ -1351,12 +1351,12 @@ static int rfuse_send_data_iov(fuse_req_t u_req, struct fuse_bufvec *buf, unsign
 	res = splice(llp->pipe[0], NULL, ch ? ch->fd : se->fd, &off_out, len, splice_flags);
 	if (res == -1) {
 		res = -errno;
-		perror("fuse: splice from pipe");
+		perror("rfuse: splice from pipe");
 		goto clear_pipe;
 	}
 	if (res != len) {
 		res = -EIO;
-		fuse_log(FUSE_LOG_ERR, "fuse: short splice from pipe: %u/%u\n",
+		fuse_log(FUSE_LOG_ERR, "rfuse: short splice from pipe: %u/%u\n",
 			res, len);
 		goto clear_pipe;
 	}
@@ -1438,7 +1438,7 @@ static int rfuse_prep_write_buf(fuse_req_t u_req, struct fuse_session *se, struc
 			return 0;
 		}
 		if (err != EINTR && err != EAGAIN)
-			perror("fuse: splice from device");
+			perror("rfuse: splice from device");
 		return -err;
 	}
 
