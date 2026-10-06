@@ -9,11 +9,19 @@
 #ifndef _FS_FUSE_I_H
 #define _FS_FUSE_I_H
 
+/*
+ * DAX (virtiofs only) is not built into rfuse.ko, even when the kernel has
+ * CONFIG_FUSE_DAX for its own fuse.ko.  Must come before any use, so this
+ * header has to be the first one every rfuse source file includes.
+ */
+#undef CONFIG_FUSE_DAX
+#undef CONFIG_FUSE_DAX_MODULE
+
 #ifndef pr_fmt
-# define pr_fmt(fmt) "fuse: " fmt
+# define pr_fmt(fmt) "rfuse: " fmt
 #endif
 
-#include <linux/fuse.h>
+#include "rfuse_kernel.h"
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/wait.h>
@@ -822,12 +830,6 @@ struct fuse_conn {
 	/** Device ID from the root super block */
 	dev_t dev;
 
-	/** Dentries in the control filesystem */
-	struct dentry *ctl_dentry[FUSE_CTL_NUM_DENTRIES];
-
-	/** number of dentries used in the above array */
-	int ctl_ndents;
-
 	/** Key for lock owner ID scrambling */
 	u32 scramble_key[4];
 
@@ -1278,13 +1280,13 @@ ssize_t fuse_getxattr(struct inode *inode, const char *name, void *value,
 		      size_t size);
 ssize_t fuse_listxattr(struct dentry *entry, char *list, size_t size);
 int fuse_removexattr(struct inode *inode, const char *name);
-extern const struct xattr_handler *fuse_xattr_handlers[];
-extern const struct xattr_handler *fuse_acl_xattr_handlers[];
-extern const struct xattr_handler *fuse_no_acl_xattr_handlers[];
+extern const struct xattr_handler * const fuse_xattr_handlers[];
 
 struct posix_acl;
-struct posix_acl *fuse_get_acl(struct inode *inode, int type, bool rcu);
-int fuse_set_acl(struct user_namespace *mnt_userns, struct inode *inode,
+struct posix_acl *fuse_get_inode_acl(struct inode *inode, int type, bool rcu);
+struct posix_acl *fuse_get_acl(struct mnt_idmap *idmap,
+			       struct dentry *dentry, int type);
+int fuse_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 		 struct posix_acl *acl, int type);
 
 /* readdir.c */
@@ -1321,9 +1323,9 @@ void fuse_dax_cancel_work(struct fuse_conn *fc);
 long fuse_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 long fuse_file_compat_ioctl(struct file *file, unsigned int cmd,
 			    unsigned long arg);
-int fuse_fileattr_get(struct dentry *dentry, struct fileattr *fa);
-int fuse_fileattr_set(struct user_namespace *mnt_userns,
-		      struct dentry *dentry, struct fileattr *fa);
+int fuse_fileattr_get(struct dentry *dentry, struct file_kattr *fa);
+int fuse_fileattr_set(struct mnt_idmap *idmap,
+		      struct dentry *dentry, struct file_kattr *fa);
 
 /* file.c */
 
@@ -1346,10 +1348,11 @@ int rfuse_do_getattr(struct inode *inode, struct kstat *stat, struct file *file)
 struct dentry *rfuse_lookup(struct inode *dir, struct dentry *entry, unsigned int flags);
 int rfuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *name, 
 			struct rfuse_req *r_req, struct inode **inode);
-int rfuse_dentry_revalidate(struct dentry *entry, unsigned int flags);
+int rfuse_dentry_revalidate(struct inode *dir, const struct qstr *name,
+			    struct dentry *entry, unsigned int flags);
 int rfuse_do_setattr(struct dentry *dentry, struct iattr *attr, struct file *file);
 int rfuse_rmdir(struct inode *dir, struct dentry *entry);
-int rfuse_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
+struct dentry *rfuse_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		      struct dentry *entry, umode_t mode);
 int rfuse_statfs(struct dentry *dentry, struct kstatfs *buf);
 int rfuse_flush(struct file *file, fl_owner_t id);
@@ -1385,23 +1388,21 @@ ssize_t rfuse_direct_io(struct fuse_io_priv *io, struct iov_iter *iter,
 ssize_t rfuse_direct_write_iter(struct kiocb *iocb, struct iov_iter *from);
 ssize_t rfuse_direct_read_iter(struct kiocb *iocb, struct iov_iter *to);
 
-int rfuse_writepage_locked(struct page *page);
-int rfuse_writepage(struct page *page, struct writeback_control *wbc);
+void rfuse_flush_writepages(struct inode *inode);
 int rfuse_writepages(struct address_space *mapping, struct writeback_control *wbc);
-int rfuse_write_begin(struct file *file, struct address_space *mapping,
-		loff_t pos, unsigned len, unsigned flags,
-		struct page **pagep, void **fsdata);
-int rfuse_write_end(struct file *file, struct address_space *mapping,
+int rfuse_write_begin(const struct kiocb *iocb, struct address_space *mapping,
+		loff_t pos, unsigned len, struct folio **foliop, void **fsdata);
+int rfuse_write_end(const struct kiocb *iocb, struct address_space *mapping,
 		loff_t pos, unsigned len, unsigned copied,
-		struct page *page, void *fsdata);
-int rfuse_launder_page(struct page *page);
+		struct folio *folio, void *fsdata);
+int rfuse_launder_folio(struct folio *folio);
 
 int rfuse_flush_times(struct inode *inode, struct fuse_file *ff);
 int rfuse_write_inode(struct inode *inode, struct writeback_control *wbc);
 
 int rfuse_rename_common(struct inode *olddir, struct dentry *oldent, struct inode *newdir, struct dentry *newent, unsigned int flags, int opcode, size_t argsize);
 
-int rfuse_symlink(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *entry, const char *link);
+int rfuse_symlink(struct mnt_idmap *idmap, struct inode *dir, struct dentry *entry, const char *link);
 int rfuse_link(struct dentry *entry, struct inode *newdir, struct dentry *newent);
 int rfuse_readlink_page(struct inode *inode, struct page *page);
 // COMPLETE QUEUE

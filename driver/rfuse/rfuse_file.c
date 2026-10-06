@@ -19,6 +19,16 @@ struct rfuse_release_in {
 
 /************ 0. Copy of original fuse functions ************/
 
+/* grab_cache_page_write_begin() was removed from the kernel */
+static struct page *rfuse_grab_cache_page_write_begin(struct address_space *mapping,
+						      pgoff_t index)
+{
+	struct folio *folio = __filemap_get_folio(mapping, index, FGP_WRITEBEGIN,
+						  mapping_gfp_mask(mapping));
+
+	return IS_ERR(folio) ? NULL : &folio->page;
+}
+
 /*
  * Wait for all pending writepages on the inode to finish.
  *
@@ -555,7 +565,7 @@ static void rfuse_aio_complete(struct fuse_io_priv *io, int err, ssize_t pos)
 			spin_unlock(&fi->lock);
 		}
 
-		io->iocb->ki_complete(io->iocb, res, 0);
+		io->iocb->ki_complete(io->iocb, res);
 	}
 
 	kref_put(&io->refcnt, rfuse_io_release);
@@ -592,14 +602,13 @@ static int rfuse_get_user_pages(struct rfuse_io_args *ria, struct iov_iter *ii,
 		unsigned npages;
 		size_t start;
 		printk("rfuse_get_user_pages: while start\n");
-		ret = iov_iter_get_pages(ii, &rp->pages[rp->num_pages],
+		ret = iov_iter_get_pages2(ii, &rp->pages[rp->num_pages],
 					*nbytesp - nbytes,
 					max_pages - rp->num_pages,
 					&start);
 		if (ret < 0)
 			break;
 
-		iov_iter_advance(ii, ret);
 		nbytes += ret;
 
 		ret += start;
@@ -793,7 +802,7 @@ ssize_t rfuse_direct_io(struct fuse_io_priv *io, struct iov_iter *iter,
 			inode_unlock(inode);
 	}
 
-	io->should_dirty = !write && iter_is_iovec(iter);
+	io->should_dirty = !write && user_backed_iter(iter);
 	while (count) {
 		ssize_t nres;
 		fl_owner_t owner = current->files;
@@ -843,7 +852,6 @@ ssize_t rfuse_direct_io(struct fuse_io_priv *io, struct iov_iter *iter,
 
 	return res > 0 ? res : err;
 }
-EXPORT_SYMBOL_GPL(rfuse_direct_io);
 
 ssize_t rfuse_direct_write_iter(struct kiocb *iocb, struct iov_iter *from)
 {
@@ -946,18 +954,18 @@ static ssize_t rfuse_fill_write_pages(struct rfuse_io_args *ria, struct address_
 
  again:
 		err = -EFAULT;
-		if (iov_iter_fault_in_readable(ii, bytes))
+		if (fault_in_iov_iter_readable(ii, bytes))
 			break;
 
 		err = -ENOMEM;
-		page = grab_cache_page_write_begin(mapping, index, 0);
+		page = rfuse_grab_cache_page_write_begin(mapping, index);
 		if (!page)
 			break;
 
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
 
-		tmp = copy_page_from_iter_atomic(page, offset, bytes, ii);
+		tmp = copy_folio_from_iter_atomic(page_folio(page), offset, bytes, ii);
 		flush_dcache_page(page);
 
 		if (!tmp) {
@@ -1042,7 +1050,7 @@ static ssize_t rfuse_send_write_pages(struct rfuse_io_args *ria,
 	ria->r_req->in_pages = true;
 
 	for (i = 0; i < rp->num_pages; i++)
-		rfuse_wait_on_page_writeback(inode, rp->pages[i]->index);
+		rfuse_wait_on_page_writeback(inode, page_folio(rp->pages[i])->index);
 
 	rfuse_write_args_fill(ria, ff, pos, count);
 
@@ -1300,8 +1308,7 @@ static void rfuse_writepage_finish(struct fuse_mount *fm,
 	int i;
 
 	for (i = 0; i < rp->num_pages; i++) {
-		dec_wb_stat(&bdi->wb, WB_WRITEBACK);
-		dec_node_page_state(rp->pages[i], NR_WRITEBACK_TEMP);
+		wb_stat_mod(&bdi->wb, WB_WRITEBACK, -1);
 		wb_writeout_inc(&bdi->wb);
 	}
 	wake_up(&fi->page_waitq);
@@ -1484,8 +1491,7 @@ int rfuse_writepage_locked(struct page *page)
 	rp->descs[0].length = PAGE_SIZE;
 	r_wpa->inode = inode;
 
-	inc_wb_stat(&inode_to_bdi(inode)->wb, WB_WRITEBACK);
-	inc_node_page_state(tmp_page, NR_WRITEBACK_TEMP);
+	wb_stat_mod(&inode_to_bdi(inode)->wb, WB_WRITEBACK, 1);
 
 	spin_lock(&fi->lock);
 	tree_insert(&fi->writepages, r_wpa);
@@ -1505,30 +1511,6 @@ err:
 	mapping_set_error(page->mapping, error);
 	end_page_writeback(page);
 	return error;
-}
-
-int rfuse_writepage(struct page *page, struct writeback_control *wbc)
-{
-	int err;
-
-	if (rfuse_page_is_writeback(page->mapping->host, page->index)) {
-		/*
-		 * ->writepages() should be called for sync() and friends.  We
-		 * should only get here on direct reclaim and then we are
-		 * allowed to skip a page which is already in flight
-		 */
-		WARN_ON(wbc->sync_mode == WB_SYNC_ALL);
-
-		redirty_page_for_writepage(wbc, page);
-		unlock_page(page);
-
-		return 0;
-	}
-
-	err = rfuse_writepage_locked(page);
-	unlock_page(page);
-
-	return err;
 }
 
 struct rfuse_fill_wb_data {
@@ -1606,7 +1588,7 @@ static bool rfuse_writepage_add(struct rfuse_writepage_args *new_r_wpa,
 
 		WARN_ON(tmp->inode != new_r_wpa->inode);
 		curr_index = tmp->ria.write.in.offset >> PAGE_SHIFT;
-		if (curr_index == page->index) {
+		if (curr_index == page_folio(page)->index) {
 			WARN_ON(tmp->ria.rp.num_pages != 1);
 			swap(tmp->ria.rp.pages[0], new_rp->pages[0]);
 			break;
@@ -1623,8 +1605,7 @@ static bool rfuse_writepage_add(struct rfuse_writepage_args *new_r_wpa,
 	if (tmp) {
 		struct backing_dev_info *bdi = inode_to_bdi(new_r_wpa->inode);
 
-		dec_wb_stat(&bdi->wb, WB_WRITEBACK);
-		dec_node_page_state(new_rp->pages[0], NR_WRITEBACK_TEMP);
+		wb_stat_mod(&bdi->wb, WB_WRITEBACK, -1);
 		wb_writeout_inc(&bdi->wb);
 		rfuse_writepage_free(new_r_wpa);
 	}
@@ -1644,7 +1625,7 @@ static bool rfuse_writepage_need_send(struct fuse_conn *fc, struct page *page,
 	 * the pages are faulted with get_user_pages(), and then after the read
 	 * completed.
 	 */
-	if (rfuse_page_is_writeback(data->inode, page->index))
+	if (rfuse_page_is_writeback(data->inode, page_folio(page)->index))
 		return true;
 
 	/* Reached max pages */
@@ -1656,7 +1637,7 @@ static bool rfuse_writepage_need_send(struct fuse_conn *fc, struct page *page,
 		return true;
 
 	/* Discontinuity */
-	if (data->orig_pages[rp->num_pages - 1]->index + 1 != page->index)
+	if (page_folio(data->orig_pages[rp->num_pages - 1])->index + 1 != page_folio(page)->index)
 		return true;
 
 	/* Need to grow the pages array?  If so, did the expansion fail? */
@@ -1722,8 +1703,7 @@ static int rfuse_writepages_fill(struct page *page,
 	rp->descs[rp->num_pages].length = PAGE_SIZE;
 	data->orig_pages[rp->num_pages] = page;
 
-	inc_wb_stat(&inode_to_bdi(inode)->wb, WB_WRITEBACK);
-	inc_node_page_state(tmp_page, NR_WRITEBACK_TEMP);
+	wb_stat_mod(&inode_to_bdi(inode)->wb, WB_WRITEBACK, 1);
 
 	err = 0;
 	if (data->r_wpa) {
@@ -1751,6 +1731,7 @@ int rfuse_writepages(struct address_space *mapping,
 	struct inode *inode = mapping->host;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct rfuse_fill_wb_data data;
+	struct folio *folio = NULL;
 	int err;
 
 	err = -EIO;
@@ -1768,7 +1749,8 @@ int rfuse_writepages(struct address_space *mapping,
 	if (!data.orig_pages)
 		goto out;
 
-	err = write_cache_pages(mapping, wbc, rfuse_writepages_fill, &data);
+	while ((folio = writeback_iter(mapping, wbc, folio, &err)))
+		err = rfuse_writepages_fill(&folio->page, wbc, &data);
 	if (data.r_wpa) {
 		WARN_ON(!data.r_wpa->ria.rp.num_pages);
 		rfuse_writepages_send(&data);
@@ -1783,10 +1765,10 @@ out:
 	return err;
 }
 
-int rfuse_write_begin(struct file *file, struct address_space *mapping,
-		loff_t pos, unsigned len, unsigned flags,
-		struct page **pagep, void **fsdata)
+int rfuse_write_begin(const struct kiocb *iocb, struct address_space *mapping,
+		loff_t pos, unsigned len, struct folio **foliop, void **fsdata)
 {
+	struct file *file = iocb->ki_filp;
 	pgoff_t index = pos >> PAGE_SHIFT;
 	struct fuse_conn *fc = get_fuse_conn(file_inode(file));
 	struct page *page;
@@ -1795,11 +1777,11 @@ int rfuse_write_begin(struct file *file, struct address_space *mapping,
 	
 	WARN_ON(!fc->writeback_cache);
 
-	page = grab_cache_page_write_begin(mapping, index, flags);
+	page = rfuse_grab_cache_page_write_begin(mapping, index);
 	if (!page)
 		goto error;
 
-	rfuse_wait_on_page_writeback(mapping->host, page->index);
+	rfuse_wait_on_page_writeback(mapping->host, page_folio(page)->index);
 
 	if (PageUptodate(page) || len == PAGE_SIZE)
 		goto success;
@@ -1818,7 +1800,7 @@ int rfuse_write_begin(struct file *file, struct address_space *mapping,
 	if (err)
 		goto cleanup;
 success:
-	*pagep = page;
+	*foliop = page_folio(page);
 	return 0;
 
 cleanup:
@@ -1828,10 +1810,11 @@ error:
 	return err;
 }
 
-int rfuse_write_end(struct file *file, struct address_space *mapping,
+int rfuse_write_end(const struct kiocb *iocb, struct address_space *mapping,
 		loff_t pos, unsigned len, unsigned copied,
-		struct page *page, void *fsdata)
+		struct folio *folio, void *fsdata)
 {
+	struct page *page = &folio->page;
 	struct inode *inode = page->mapping->host;
 
 	/* Haven't copied anything?  Skip zeroing, size extending, dirtying. */
@@ -1855,17 +1838,18 @@ unlock:
 	return copied;
 }
 
-int rfuse_launder_page(struct page *page)
+int rfuse_launder_folio(struct folio *folio)
 {
+	struct page *page = &folio->page;
 	int err = 0;
 	if (clear_page_dirty_for_io(page)) {
 		struct inode *inode = page->mapping->host;
 
 		/* Serialize with pending writeback for the same page */
-		rfuse_wait_on_page_writeback(inode, page->index);
+		rfuse_wait_on_page_writeback(inode, page_folio(page)->index);
 		err = rfuse_writepage_locked(page);
 		if (!err)
-			rfuse_wait_on_page_writeback(inode, page->index);
+			rfuse_wait_on_page_writeback(inode, page_folio(page)->index);
 	}
 	return err;
 }
@@ -1950,7 +1934,7 @@ int rfuse_do_readpage(struct file *file, struct page *page){
 	 * page-cache page, so make sure we read a properly synced
 	 * page.
 	 */
-	rfuse_wait_on_page_writeback(inode, page->index);
+	rfuse_wait_on_page_writeback(inode, page_folio(page)->index);
 
 	attr_ver = fuse_get_attr_version(fm->fc);
 
@@ -2027,8 +2011,6 @@ static void rfuse_readpages_end(struct fuse_mount *fm, struct rfuse_req *r_req, 
 
 		if (!err)
 			SetPageUptodate(page);
-		else
-			SetPageError(page);
 		unlock_page(page);
 		put_page(page);
 	}

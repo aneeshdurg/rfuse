@@ -346,7 +346,7 @@ int fuse_mnt_check_fuseblk(void)
 		return 1;
 
 	while (fgets(buf, sizeof(buf), f))
-		if (strstr(buf, "fuseblk\n")) {
+		if (strstr(buf, "rfuseblk\n")) {
 			fclose(f);
 			return 1;
 		}

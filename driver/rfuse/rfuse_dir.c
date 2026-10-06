@@ -143,10 +143,10 @@ static void rfuse_fillattr(struct inode *inode, struct fuse_attr *attr, struct k
 	/* see the comment in fuse_change_attributes() */
 	if (fc->writeback_cache && S_ISREG(inode->i_mode)) {
 		attr->size = i_size_read(inode);
-		attr->mtime = inode->i_mtime.tv_sec;
-		attr->mtimensec = inode->i_mtime.tv_nsec;
-		attr->ctime = inode->i_ctime.tv_sec;
-		attr->ctimensec = inode->i_ctime.tv_nsec;
+		attr->mtime = inode_get_mtime_sec(inode);
+		attr->mtimensec = inode_get_mtime_nsec(inode);
+		attr->ctime = inode_get_ctime_sec(inode);
+		attr->ctimensec = inode_get_ctime_nsec(inode);
 	}
 
 	stat->dev = inode->i_sb->s_dev;
@@ -370,9 +370,9 @@ struct dentry *rfuse_lookup(struct inode *dir, struct dentry *entry, unsigned in
  * the lookup once more.  If the lookup results in the same inode,
  * then refresh the attributes, timeouts and mark the dentry valid.
  */
-int rfuse_dentry_revalidate(struct dentry *entry, unsigned int flags){
+int rfuse_dentry_revalidate(struct inode *dir, const struct qstr *name,
+			    struct dentry *entry, unsigned int flags){
 	struct inode *inode;
-	struct dentry *parent;
 	struct fuse_mount *fm;
 	struct fuse_inode *fi;
 	struct rfuse_req *r_req;
@@ -399,16 +399,14 @@ int rfuse_dentry_revalidate(struct dentry *entry, unsigned int flags){
 		fm = get_fuse_mount(inode);
 		
 		attr_version = fuse_get_attr_version(fm->fc);
-		parent = dget_parent(entry);
 
 		r_req = rfuse_get_req(fm, false, false); // Rfuse test
 		riq = rfuse_get_specific_iqueue(fm->fc, r_req->riq_id);
-		rfuse_lookup_init(fm,r_req,get_node_id(d_inode(parent)),&entry->d_name);
+		rfuse_lookup_init(fm,r_req,get_node_id(dir),name);
 		ret = rfuse_simple_request(r_req);
 		rfuse_req_allocated = true;
 
 		outarg = (struct fuse_entry_out*)&riq->karg[r_req->out.arg];
-		dput(parent);
 		/* Zero nodeid is same as -ENOENT */
 		if (!ret && !outarg->nodeid)
 			ret = -ENOENT;
@@ -443,9 +441,7 @@ int rfuse_dentry_revalidate(struct dentry *entry, unsigned int flags){
 				return -ECHILD;
 			}
 		} else if (test_and_clear_bit(FUSE_I_INIT_RDPLUS, &fi->state)) {
-			parent = dget_parent(entry);
-			rfuse_advise_use_readdirplus(d_inode(parent));
-			dput(parent);
+			rfuse_advise_use_readdirplus(dir);
 		}
 	}
 	ret = 1;
@@ -483,7 +479,7 @@ int rfuse_do_setattr(struct dentry *dentry, struct iattr *attr, struct file *fil
 	if (!fc->default_permissions)
 		attr->ia_valid |= ATTR_FORCE;
 
-	err = setattr_prepare(&init_user_ns, dentry, attr);
+	err = setattr_prepare(&nop_mnt_idmap, dentry, attr);
 	if (err)
 		return err;
 
@@ -590,9 +586,9 @@ int rfuse_do_setattr(struct dentry *dentry, struct iattr *attr, struct file *fil
 	/* the kernel maintains i_mtime locally */
 	if (trust_local_cmtime) {
 		if (attr->ia_valid & ATTR_MTIME)
-			inode->i_mtime = attr->ia_mtime;
+			inode_set_mtime_to_ts(inode, attr->ia_mtime);
 		if (attr->ia_valid & ATTR_CTIME)
-			inode->i_ctime = attr->ia_ctime;
+			inode_set_ctime_to_ts(inode, attr->ia_ctime);
 		/* FIXME: clear I_DIRTY_SYNC? */
 	}
 
@@ -683,7 +679,11 @@ int rfuse_rmdir(struct inode *dir, struct dentry *entry){
 	Code shared between mknod, mkdir, symlink and link
 */
 
-static int rfuse_create_new_entry(struct fuse_mount *fm, struct rfuse_req *r_req,
+/*
+ * Returns NULL on success with @entry instantiated, an alternate dentry
+ * (directories only, see d_splice_alias()) or an ERR_PTR.
+ */
+static struct dentry *rfuse_create_new_entry(struct fuse_mount *fm, struct rfuse_req *r_req,
 			struct inode *dir, struct dentry *entry, umode_t mode){
 	struct fuse_entry_out *outarg;
 	unsigned int out_argument_index; // argument
@@ -694,7 +694,7 @@ static int rfuse_create_new_entry(struct fuse_mount *fm, struct rfuse_req *r_req
 	int err;
 	
 	if (fuse_is_bad(dir))
-		return -EIO;
+		return ERR_PTR(-EIO);
 	
 	out_argument_index = rfuse_get_argument_buffer(fm, r_req->riq_id);
 	arg = (struct rfuse_arg*)&riq->karg[out_argument_index]; // Argument
@@ -721,31 +721,37 @@ static int rfuse_create_new_entry(struct fuse_mount *fm, struct rfuse_req *r_req
 
 	if (!inode) {
 		rfuse_queue_forget(fm->fc,outarg->nodeid,1);
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 	}
 
 	d_drop(entry);
 	d = d_splice_alias(inode, entry);
 	if (IS_ERR(d))
-		return PTR_ERR(d);
+		return d;
 
-	if (d) {
+	if (d)
 		fuse_change_entry_timeout(d, outarg);
-		dput(d);
-	} else {
+	else
 		fuse_change_entry_timeout(entry, outarg);
-	}
 	rfuse_dir_changed(dir);
-	return 0;
+	return d;
 out:
-	return err;
+	return ERR_PTR(err);
+}
+
+/* d_splice_alias() only returns an alternate dentry for directories */
+static int rfuse_create_new_nondir(struct fuse_mount *fm, struct rfuse_req *r_req,
+			struct inode *dir, struct dentry *entry, umode_t mode)
+{
+	WARN_ON_ONCE(S_ISDIR(mode));
+	return PTR_ERR(rfuse_create_new_entry(fm, r_req, dir, entry, mode));
 }
 
 
-int rfuse_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
+struct dentry *rfuse_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 		      struct dentry *entry, umode_t mode)
 {
-	int err;
+	struct dentry *ret;
 	struct fuse_mkdir_in *inarg; // operation specific header
 	struct fuse_mount *fm = get_fuse_mount(dir);
 	struct rfuse_req *r_req;
@@ -771,9 +777,9 @@ int rfuse_mkdir(struct user_namespace *mnt_userns, struct inode *dir,
 	r_req->in.arg[0] = in_argument_index;
 	r_req->in.arglen[0] = entry->d_name.len + 1;
 
-	err = rfuse_create_new_entry(fm, r_req, dir, entry, S_IFDIR);
+	ret = rfuse_create_new_entry(fm, r_req, dir, entry, S_IFDIR);
 	rfuse_put_request(r_req);
-	return err;
+	return ret;
 }
 
 
@@ -998,12 +1004,12 @@ int rfuse_flush_times(struct inode *inode, struct fuse_file *ff)
 	memset(&outarg, 0, sizeof(outarg));
 
 	inarg->valid = FATTR_MTIME;
-	inarg->mtime = inode->i_mtime.tv_sec;
-	inarg->mtimensec = inode->i_mtime.tv_nsec;
+	inarg->mtime = inode_get_mtime_sec(inode);
+	inarg->mtimensec = inode_get_mtime_nsec(inode);
 	if (fm->fc->minor >= 23) {
 		inarg->valid |= FATTR_CTIME;
-		inarg->ctime = inode->i_ctime.tv_sec;
-		inarg->ctimensec = inode->i_ctime.tv_nsec;
+		inarg->ctime = inode_get_ctime_sec(inode);
+		inarg->ctimensec = inode_get_ctime_nsec(inode);
 	}
 	if (ff) {
 		inarg->valid |= FATTR_FH;
@@ -1094,7 +1100,7 @@ int rfuse_rename_common(struct inode *olddir, struct dentry *oldent,
 
 /************ 9. LINK  ************/
 
-int rfuse_symlink(struct user_namespace *mnt_userns, struct inode *dir,
+int rfuse_symlink(struct mnt_idmap *idmap, struct inode *dir,
 			struct dentry *entry, const char *link)
 {
 	int err;
@@ -1124,7 +1130,7 @@ int rfuse_symlink(struct user_namespace *mnt_userns, struct inode *dir,
 	r_req->in.arglen[1] = len;
 	memcpy(arg2, (char*)link, len);
 
-	err = rfuse_create_new_entry(fm, r_req, dir, entry, S_IFLNK);
+	err = rfuse_create_new_nondir(fm, r_req, dir, entry, S_IFLNK);
 	rfuse_put_request(r_req);
 	return err;
 }
@@ -1155,7 +1161,7 @@ int rfuse_link(struct dentry *entry, struct inode *newdir,
 	r_req->in.arglen[0] = newent->d_name.len + 1;
 	memcpy(arg1, (char*)newent->d_name.name, newent->d_name.len + 1);
 
-	err = rfuse_create_new_entry(fm, r_req, newdir, newent, inode->i_mode);
+	err = rfuse_create_new_nondir(fm, r_req, newdir, newent, inode->i_mode);
 	/* Contrary to "normal" filesystems it can happen that link
 	   makes two "logical" inodes point to the same "physical"
 	   inode.  We invalidate the attributes of the old one, so it

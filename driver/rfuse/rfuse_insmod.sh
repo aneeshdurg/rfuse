@@ -1,12 +1,13 @@
 #!/bin/bash
+# (Re)load rfuse.ko.  It registers "rfuse"/"rfuseblk", /dev/rfuse and
+# "rfusectl", so it can be loaded while fuse.ko is loaded.
 
-if [ "$1" == "first" ]
+if [ "$1" != "first" ]
 then
-	sudo insmod fuse.ko
-	echo first done
-else
-	sudo umount /sys/fs/fuse/connections
-	sudo rmmod fuse
-	sudo insmod fuse.ko
-	echo done
+	if grep -qw /sys/fs/rfuse/connections /proc/mounts; then
+		sudo umount /sys/fs/rfuse/connections
+	fi
+	sudo rmmod rfuse
 fi
+sudo insmod rfuse.ko
+echo done

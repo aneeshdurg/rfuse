@@ -20,11 +20,11 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/swap.h>
 #include <linux/splice.h>
+#include <linux/io.h>
 #include <linux/sched.h>
 
 
-MODULE_ALIAS_MISCDEV(FUSE_MINOR);
-MODULE_ALIAS("devname:fuse");
+MODULE_ALIAS("devname:rfuse");
 
 /* Ordinary requests have even IDs, while interrupts IDs are odd */
 #define FUSE_INT_REQ_BIT (1ULL << 0)
@@ -204,14 +204,12 @@ unsigned int fuse_len_args(unsigned int numargs, struct fuse_arg *args)
 
 	return nbytes;
 }
-EXPORT_SYMBOL_GPL(fuse_len_args);
 
 u64 fuse_get_unique(struct fuse_iqueue *fiq)
 {
 	fiq->reqctr += FUSE_REQ_ID_STEP;
 	return fiq->reqctr;
 }
-EXPORT_SYMBOL_GPL(fuse_get_unique);
 
 static unsigned int fuse_req_hash(u64 unique)
 {
@@ -235,7 +233,6 @@ const struct fuse_iqueue_ops fuse_dev_fiq_ops = {
 	.wake_interrupt_and_unlock	= fuse_dev_wake_and_unlock,
 	.wake_pending_and_unlock	= fuse_dev_wake_and_unlock,
 };
-EXPORT_SYMBOL_GPL(fuse_dev_fiq_ops);
 
 static void queue_request_and_unlock(struct fuse_iqueue *fiq,
 		struct fuse_req *req)
@@ -330,10 +327,6 @@ void fuse_request_end(struct fuse_req *req)
 				wake_up(&fc->blocked_waitq);
 		}
 
-		if (fc->num_background == fc->congestion_threshold && fm->sb) {
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
-		}
 		fc->num_background--;
 		fc->active_background--;
 		flush_bg_queue(fc);
@@ -348,7 +341,6 @@ void fuse_request_end(struct fuse_req *req)
 put_request:
 	fuse_put_request(req);
 }
-EXPORT_SYMBOL_GPL(fuse_request_end);
 
 static int queue_interrupt(struct fuse_req *req)
 {
@@ -560,10 +552,6 @@ static bool fuse_request_queue_background(struct fuse_req *req)
 		fc->num_background++;
 		if (fc->num_background == fc->max_background)
 			fc->blocked = 1;
-		if (fc->num_background == fc->congestion_threshold && fm->sb) {
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
-		}
 		list_add_tail(&req->list, &fc->bg_queue);
 		flush_bg_queue(fc);
 		queued = true;
@@ -600,7 +588,6 @@ int fuse_simple_background(struct fuse_mount *fm, struct fuse_args *args,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(fuse_simple_background);
 
 static int fuse_simple_notify_reply(struct fuse_mount *fm,
 		struct fuse_args *args, u64 unique)
@@ -758,14 +745,13 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 		}
 	} else {
 		size_t off;
-		err = iov_iter_get_pages(cs->iter, &page, PAGE_SIZE, 1, &off);
+		err = iov_iter_get_pages2(cs->iter, &page, PAGE_SIZE, 1, &off);
 		if (err < 0)
 			return err;
 		BUG_ON(!err);
 		cs->len = err;
 		cs->offset = off;
 		cs->pg = page;
-		iov_iter_advance(cs->iter, err);
 	}
 
 	return lock_request(cs->req);
@@ -793,30 +779,11 @@ static int fuse_copy_do(struct fuse_copy_state *cs, void **val, unsigned *size)
 	return ncpy;
 }
 
-static int fuse_check_page(struct page *page)
-{
-	if (page_mapcount(page) ||
-			page->mapping != NULL ||
-			(page->flags & PAGE_FLAGS_CHECK_AT_PREP &
-			 ~(1 << PG_locked |
-				 1 << PG_referenced |
-				 1 << PG_uptodate |
-				 1 << PG_lru |
-				 1 << PG_active |
-				 1 << PG_workingset |
-				 1 << PG_reclaim |
-				 1 << PG_waiters))) {
-		dump_page(page, "fuse: trying to steal weird page");
-		return 1;
-	}
-	return 0;
-}
 
 static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 {
 	int err;
 	struct page *oldpage = *pagep;
-	struct page *newpage;
 	struct pipe_buffer *buf = cs->pipebufs;
 
 	get_page(oldpage);
@@ -836,69 +803,18 @@ static int fuse_try_move_page(struct fuse_copy_state *cs, struct page **pagep)
 	cs->pipebufs++;
 	cs->nr_segs--;
 
-	if (cs->len != PAGE_SIZE)
-		goto out_fallback;
-
-	if (!pipe_buf_try_steal(cs->pipe, buf))
-		goto out_fallback;
-
-	newpage = buf->page;
-
-	if (!PageUptodate(newpage))
-		SetPageUptodate(newpage);
-
-	ClearPageMappedToDisk(newpage);
-
-	if (fuse_check_page(newpage) != 0)
-		goto out_fallback_unlock;
-
 	/*
-	 * This is a new and locked page, it shouldn't be mapped or
-	 * have any special flags on it
+	 * Stealing pipe pages into the page cache (SPLICE_F_MOVE) relied on
+	 * page cache internals that are no longer available to modules;
+	 * always fall back to copying.
 	 */
-	if (WARN_ON(page_mapped(oldpage)))
-		goto out_fallback_unlock;
-	if (WARN_ON(page_has_private(oldpage)))
-		goto out_fallback_unlock;
-	if (WARN_ON(PageDirty(oldpage) || PageWriteback(oldpage)))
-		goto out_fallback_unlock;
-	if (WARN_ON(PageMlocked(oldpage)))
-		goto out_fallback_unlock;
+	goto out_fallback;
 
-	replace_page_cache_page(oldpage, newpage);
-
-	get_page(newpage);
-
-	if (!(buf->flags & PIPE_BUF_FLAG_LRU))
-		lru_cache_add(newpage);
-
-	err = 0;
-	spin_lock(&cs->req->waitq.lock);
-	if (test_bit(FR_ABORTED, &cs->req->flags))
-		err = -ENOENT;
-	else
-		*pagep = newpage;
-	spin_unlock(&cs->req->waitq.lock);
-
-	if (err) {
-		unlock_page(newpage);
-		put_page(newpage);
-		goto out_put_old;
-	}
-
-	unlock_page(oldpage);
-	/* Drop ref for ap->pages[] array */
-	put_page(oldpage);
-	cs->len = 0;
-
-	err = 0;
 out_put_old:
 	/* Drop ref obtained in this function */
 	put_page(oldpage);
 	return err;
 
-out_fallback_unlock:
-	unlock_page(newpage);
 out_fallback:
 	cs->pg = buf->page;
 	cs->offset = buf->offset;
@@ -1105,7 +1021,6 @@ struct fuse_forget_link *fuse_dequeue_forget(struct fuse_iqueue *fiq,
 
 	return head;
 }
-EXPORT_SYMBOL(fuse_dequeue_forget);
 
 static int fuse_read_single_forget(struct fuse_iqueue *fiq,
 		struct fuse_copy_state *cs,
@@ -1406,7 +1321,7 @@ static ssize_t fuse_dev_read(struct kiocb *iocb, struct iov_iter *to)
 	if (!fud)
 		return -EPERM;
 
-	if (!iter_is_iovec(to))
+	if (!user_backed_iter(to))
 		return -EINVAL;
 
 	if(iov_iter_count(to) == 1052672){ // This is just for testing
@@ -2005,7 +1920,7 @@ static ssize_t fuse_dev_write(struct kiocb *iocb, struct iov_iter *from)
 	if (!fud)
 		return -EPERM;
 
-	if (!iter_is_iovec(from))
+	if (!user_backed_iter(from))
 		return -EINVAL;
 
 	/**
@@ -2250,7 +2165,6 @@ void fuse_abort_conn(struct fuse_conn *fc)
 	}
 	
 }
-EXPORT_SYMBOL_GPL(fuse_abort_conn);
 
 void fuse_wait_aborted(struct fuse_conn *fc)
 {
@@ -2287,7 +2201,6 @@ int fuse_dev_release(struct inode *inode, struct file *file)
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(fuse_dev_release);
 
 static int fuse_dev_fasync(int fd, struct file *file, int on)
 {
@@ -2459,7 +2372,6 @@ const struct file_operations fuse_dev_operations = {
 	.owner		= THIS_MODULE,
 	.open		= fuse_dev_open,
 	.mmap		= rfuse_dev_mmap,
-	.llseek		= no_llseek,
 	.read_iter	= fuse_dev_read,
 	.splice_read	= rfuse_dev_splice_read,
 	.write_iter	= fuse_dev_write,
@@ -2470,18 +2382,18 @@ const struct file_operations fuse_dev_operations = {
 	.unlocked_ioctl = fuse_dev_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
 };
-EXPORT_SYMBOL_GPL(fuse_dev_operations);
 
 static struct miscdevice fuse_miscdevice = {
-	.minor = FUSE_MINOR,
-	.name  = "fuse",
+	.minor = MISC_DYNAMIC_MINOR,
+	.name  = "rfuse",
+	.mode  = 0666,
 	.fops = &fuse_dev_operations,
 };
 
 int __init fuse_dev_init(void)
 {
 	int err = -ENOMEM;
-	fuse_req_cachep = kmem_cache_create("fuse_request",
+	fuse_req_cachep = kmem_cache_create("rfuse_request",
 			sizeof(struct fuse_req),
 			0, 0, NULL);
 	if (!fuse_req_cachep)

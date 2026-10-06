@@ -228,7 +228,7 @@ static struct fuse_chan *fuse_clone_chan(struct fuse_mt *mt)
 	int clonefd;
 	uint32_t masterfd;
 	struct fuse_chan *newch;
-	const char *devname = "/dev/fuse";
+	const char *devname = "/dev/rfuse";
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0

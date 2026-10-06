@@ -254,10 +254,10 @@ int main(int argc, char *argv[])
 	else
 		basename = argv[0];
 
-	if (strncmp(basename, "mount.fuse.", 11) == 0)
-		type = basename + 11;
-	if (strncmp(basename, "mount.fuseblk.", 14) == 0)
-		type = basename + 14;
+	if (strncmp(basename, "mount.rfuse.", 12) == 0)
+		type = basename + 12;
+	if (strncmp(basename, "mount.rfuseblk.", 15) == 0)
+		type = basename + 15;
 
 	if (type && !type[0])
 		type = NULL;
@@ -288,10 +288,10 @@ int main(int argc, char *argv[])
 				exit(1);
 			}
 			type = argv[i];
-			if (strncmp(type, "fuse.", 5) == 0)
-				type += 5;
-			else if (strncmp(type, "fuseblk.", 8) == 0)
-				type += 8;
+			if (strncmp(type, "rfuse.", 6) == 0)
+				type += 6;
+			else if (strncmp(type, "rfuseblk.", 9) == 0)
+				type += 9;
 
 			if (!type[0]) {
 				fprintf(stderr,

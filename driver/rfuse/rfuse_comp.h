@@ -1,7 +1,7 @@
 #ifndef _FS_RFUSE_COMP_H
 #define _FS_RFUSE_COMP_H
 
-#include <linux/fuse.h>
+#include "rfuse_kernel.h"
 #include <linux/types.h>
 #include <linux/atomic.h>
 #include <linux/spinlock.h>

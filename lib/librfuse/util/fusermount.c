@@ -32,9 +32,9 @@
 #include <stdbool.h>
 #include <sys/vfs.h>
 
-#define FUSE_COMMFD_ENV		"_FUSE_COMMFD"
+#define FUSE_COMMFD_ENV		"_RFUSE_COMMFD"
 
-#define FUSE_DEV "/dev/fuse"
+#define FUSE_DEV "/dev/rfuse"
 
 #ifndef MS_DIRSYNC
 #define MS_DIRSYNC 128
@@ -171,10 +171,10 @@ static int may_unmount(const char *mnt, int quiet)
 	found = 0;
 	while ((entp = getmntent(fp)) != NULL) {
 		if (!found && strcmp(entp->mnt_dir, mnt) == 0 &&
-		    (strcmp(entp->mnt_type, "fuse") == 0 ||
-		     strcmp(entp->mnt_type, "fuseblk") == 0 ||
-		     strncmp(entp->mnt_type, "fuse.", 5) == 0 ||
-		     strncmp(entp->mnt_type, "fuseblk.", 8) == 0)) {
+		    (strcmp(entp->mnt_type, "rfuse") == 0 ||
+		     strcmp(entp->mnt_type, "rfuseblk") == 0 ||
+		     strncmp(entp->mnt_type, "rfuse.", 6) == 0 ||
+		     strncmp(entp->mnt_type, "rfuseblk.", 9) == 0)) {
 			char *p = strstr(entp->mnt_opts, "user=");
 			if (p &&
 			    (p == entp->mnt_opts || *(p-1) == ',') &&
@@ -465,8 +465,8 @@ static int count_fuse_fs(void)
 		return -1;
 	}
 	while ((entp = getmntent(fp)) != NULL) {
-		if (strcmp(entp->mnt_type, "fuse") == 0 ||
-		    strncmp(entp->mnt_type, "fuse.", 5) == 0)
+		if (strcmp(entp->mnt_type, "rfuse") == 0 ||
+		    strncmp(entp->mnt_type, "rfuse.", 6) == 0)
 			count ++;
 	}
 	endmntent(fp);
@@ -840,9 +840,9 @@ static int do_mount(const char *mnt, const char **typep, mode_t rootmode,
 	}
 
 	if (subtype)
-		sprintf(type, "%s.%s", blkdev ? "fuseblk" : "fuse", subtype);
+		sprintf(type, "%s.%s", blkdev ? "rfuseblk" : "rfuse", subtype);
 	else
-		strcpy(type, blkdev ? "fuseblk" : "fuse");
+		strcpy(type, blkdev ? "rfuseblk" : "rfuse");
 
 	if (fsname)
 		strcpy(source, fsname);
@@ -852,7 +852,7 @@ static int do_mount(const char *mnt, const char **typep, mode_t rootmode,
 	res = mount_notrunc(source, mnt, type, flags, optbuf);
 	if (res == -1 && errno == ENODEV && subtype) {
 		/* Probably missing subtype support */
-		strcpy(type, blkdev ? "fuseblk" : "fuse");
+		strcpy(type, blkdev ? "rfuseblk" : "rfuse");
 		if (fsname) {
 			if (!blkdev)
 				sprintf(source, "%s#%s", subtype, fsname);
@@ -1074,7 +1074,7 @@ static int open_fuse_device(char **devp)
 		return fd;
 
 	fprintf(stderr,
-		"%s: fuse device not found, try 'modprobe fuse' first\n",
+		"%s: rfuse device not found, try 'modprobe rfuse' first\n",
 		progname);
 
 	return -1;
@@ -1271,7 +1271,7 @@ int main(int argc, char *argv[])
 		{"version", no_argument, NULL, 'V'},
 		{0, 0, 0, 0}};
 
-	progname = strdup(argc > 0 ? argv[0] : "fusermount");
+	progname = strdup(argc > 0 ? argv[0] : "rfusermount3");
 	if (progname == NULL) {
 		fprintf(stderr, "%s: failed to allocate memory\n", argv[0]);
 		exit(1);

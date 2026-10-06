@@ -41,8 +41,8 @@
 #define umount2(mnt, flags) unmount(mnt, (flags == 2) ? MNT_FORCE : 0)
 #endif
 
-#define FUSERMOUNT_PROG		"fusermount3"
-#define FUSE_COMMFD_ENV		"_FUSE_COMMFD"
+#define FUSERMOUNT_PROG		"rfusermount3"
+#define FUSE_COMMFD_ENV		"_RFUSE_COMMFD"
 
 #ifndef HAVE_FORK
 #define fork() vfork()
@@ -282,7 +282,7 @@ void fuse_kern_unmount(const char *mountpoint, int fd)
 	}
 
 	if (geteuid() == 0) {
-		fuse_mnt_umount("fuse", mountpoint, mountpoint,  1);
+		fuse_mnt_umount("rfuse", mountpoint, mountpoint,  1);
 		return;
 	}
 
@@ -356,7 +356,7 @@ static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
 		snprintf(env, sizeof(env), "%i", fds[0]);
 		setenv(FUSE_COMMFD_ENV, env, 1);
 		exec_fusermount(argv);
-		perror("fuse: failed to exec fusermount3");
+		perror("rfuse: failed to exec rfusermount3");
 		_exit(1);
 	}
 
@@ -384,7 +384,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 			  const char *mnt_opts)
 {
 	char tmp[128];
-	const char *devname = "/dev/fuse";
+	const char *devname = "/dev/rfuse";
 	char *source = NULL;
 	char *type = NULL;
 	struct stat stbuf;
@@ -412,7 +412,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	fd = open(devname, O_RDWR | O_CLOEXEC);
 	if (fd == -1) {
 		if (errno == ENODEV || errno == ENOENT)
-			fuse_log(FUSE_LOG_ERR, "fuse: device not found, try 'modprobe fuse' first\n");
+			fuse_log(FUSE_LOG_ERR, "rfuse: device not found, try 'modprobe rfuse' first\n");
 		else
 			fuse_log(FUSE_LOG_ERR, "fuse: failed to open %s: %s\n",
 				devname, strerror(errno));
@@ -438,7 +438,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 		goto out_close;
 	}
 
-	strcpy(type, mo->blkdev ? "fuseblk" : "fuse");
+	strcpy(type, mo->blkdev ? "rfuseblk" : "rfuse");
 	if (mo->subtype) {
 		strcat(type, ".");
 		strcat(type, mo->subtype);
@@ -449,7 +449,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	res = mount(source, mnt, type, mo->flags, mo->kernel_opts);
 	if (res == -1 && errno == ENODEV && mo->subtype) {
 		/* Probably missing subtype support */
-		strcpy(type, mo->blkdev ? "fuseblk" : "fuse");
+		strcpy(type, mo->blkdev ? "rfuseblk" : "rfuse");
 		if (mo->fsname) {
 			if (!mo->blkdev)
 				sprintf(source, "%s#%s", mo->subtype,
@@ -471,7 +471,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 			if (mo->blkdev && errno == ENODEV &&
 			    !fuse_mnt_check_fuseblk())
 				fuse_log(FUSE_LOG_ERR,
-					"fuse: 'fuseblk' support missing\n");
+					"rfuse: 'rfuseblk' support missing\n");
 			else
 				fuse_log(FUSE_LOG_ERR, "fuse: mount failed: %s\n",
 					strerror(errno_save));
@@ -482,12 +482,12 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	
 #ifndef IGNORE_MTAB
 	if (geteuid() == 0) {
-		char *newmnt = fuse_mnt_resolve_path("fuse", mnt);
+		char *newmnt = fuse_mnt_resolve_path("rfuse", mnt);
 		res = -1;
 		if (!newmnt)
 			goto out_umount;
 
-		res = fuse_mnt_add_mount("fuse", source, newmnt, type,
+		res = fuse_mnt_add_mount("rfuse", source, newmnt, type,
 					 mnt_opts);
 		free(newmnt);
 		if (res == -1)

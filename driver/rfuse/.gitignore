@@ -1,0 +1,10 @@
+# kbuild products
+*.o
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+.*.o.d
+.module-common.o
+Module.symvers
+modules.order

@@ -12,6 +12,7 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/swap.h>
 #include <linux/splice.h>
+#include <linux/io.h>
 #include <linux/sched.h>
 #include <linux/random.h>
 #include <asm/atomic.h>
@@ -96,24 +97,6 @@ static void rfuse_force_creds(struct rfuse_req *r_req){
 
 }
 
-static int rfuse_check_page(struct page *page)
-{
-	if (page_mapcount(page) ||
-			page->mapping != NULL ||
-			(page->flags & PAGE_FLAGS_CHECK_AT_PREP &
-			 ~(1 << PG_locked |
-				 1 << PG_referenced |
-				 1 << PG_uptodate |
-				 1 << PG_lru |
-				 1 << PG_active |
-				 1 << PG_workingset |
-				 1 << PG_reclaim |
-				 1 << PG_waiters))) {
-		dump_page(page, "fuse: trying to steal weird page");
-		return 1;
-	}
-	return 0;
-}
 
 
 
@@ -1028,10 +1011,6 @@ static bool rfuse_request_queue_background(struct rfuse_req *r_req)
 		if (riq->num_background == riq->max_background) {
 			riq->blocked = 1;
 		}
-		if (riq->num_background == riq->congestion_threshold && fm->sb) {
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			set_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
-		}
 		list_add_tail(&bg_entry->list, &riq->bg_queue); // Add it to background queue
 		rfuse_flush_bg_queue(fc, r_req->riq_id);
 		queued = true;
@@ -1074,10 +1053,6 @@ void rfuse_request_end(struct rfuse_req *r_req){
 				wake_up(&riq->blocked_waitq);
 		}
 
-		if (riq->num_background == riq->congestion_threshold && fm->sb) {
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_SYNC);
-			clear_bdi_congested(fm->sb->s_bdi, BLK_RW_ASYNC);
-		}
 		riq->num_background--;
 		riq->active_background--;
 		rfuse_flush_bg_queue(fc, r_req->riq_id);
@@ -1233,14 +1208,13 @@ static int rfuse_copy_fill(struct rfuse_copy_state *rcs)
 		}
 	} else {
 		size_t off;
-		err = iov_iter_get_pages(rcs->iter, &page, PAGE_SIZE, 1, &off);
+		err = iov_iter_get_pages2(rcs->iter, &page, PAGE_SIZE, 1, &off);
 		if (err < 0)
 			return err;
 		BUG_ON(!err);
 		rcs->len = err;
 		rcs->offset = off;
 		rcs->pg = page;
-		iov_iter_advance(rcs->iter, err);
 	}
 
 	return rfuse_lock_request(rcs->r_req);
@@ -1272,7 +1246,6 @@ static int rfuse_try_move_page(struct rfuse_copy_state *rcs, struct page **pagep
 {
 	int err;
 	struct page *oldpage = *pagep;
-	struct page *newpage;
 	struct pipe_buffer *buf = rcs->pipebufs;
 
 	get_page(oldpage);
@@ -1292,69 +1265,18 @@ static int rfuse_try_move_page(struct rfuse_copy_state *rcs, struct page **pagep
 	rcs->pipebufs++;
 	rcs->nr_segs--;
 
-	if (rcs->len != PAGE_SIZE)
-		goto out_fallback;
-
-	if (!pipe_buf_try_steal(rcs->pipe, buf))
-		goto out_fallback;
-
-	newpage = buf->page;
-
-	if (!PageUptodate(newpage))
-		SetPageUptodate(newpage);
-
-	ClearPageMappedToDisk(newpage);
-
-	if (rfuse_check_page(newpage) != 0)
-		goto out_fallback_unlock;
-
 	/*
-	 * This is a new and locked page, it shouldn't be mapped or
-	 * have any special flags on it
+	 * Stealing pipe pages into the page cache (SPLICE_F_MOVE) relied on
+	 * page cache internals that are no longer available to modules;
+	 * always fall back to copying.
 	 */
-	if (WARN_ON(page_mapped(oldpage)))
-		goto out_fallback_unlock;
-	if (WARN_ON(page_has_private(oldpage)))
-		goto out_fallback_unlock;
-	if (WARN_ON(PageDirty(oldpage) || PageWriteback(oldpage)))
-		goto out_fallback_unlock;
-	if (WARN_ON(PageMlocked(oldpage)))
-		goto out_fallback_unlock;
+	goto out_fallback;
 
-	replace_page_cache_page(oldpage, newpage);
-
-	get_page(newpage);
-
-	if (!(buf->flags & PIPE_BUF_FLAG_LRU))
-		lru_cache_add(newpage);
-
-	err = 0;
-	spin_lock(&rcs->r_req->waitq.lock);
-	if (test_bit(FR_ABORTED, &rcs->r_req->flags))
-		err = -ENOENT;
-	else
-		*pagep = newpage;
-	spin_unlock(&rcs->r_req->waitq.lock);
-
-	if (err) {
-		unlock_page(newpage);
-		put_page(newpage);
-		goto out_put_old;
-	}
-
-	unlock_page(oldpage);
-	/* Drop ref for ap->pages[] array */
-	put_page(oldpage);
-	rcs->len = 0;
-
-	err = 0;
 out_put_old:
 	/* Drop ref obtained in this function */
 	put_page(oldpage);
 	return err;
 
-out_fallback_unlock:
-	unlock_page(newpage);
 out_fallback:
 	rcs->pg = buf->page;
 	rcs->offset = buf->offset;
@@ -1730,4 +1652,3 @@ void rfuse_abort_conn(struct fuse_conn *fc){
 		spin_unlock(&riq[i]->lock);
 	}
 }
-EXPORT_SYMBOL_GPL(rfuse_abort_conn);
