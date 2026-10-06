@@ -508,11 +508,19 @@ void rfuse_put_argument_buffer(struct fuse_mount *fm, uint32_t arg_index, int ri
 }
 
 static void rfuse_request_free(struct rfuse_req *req){
-	if(req->in.arglen[0] != 0)
-		rfuse_put_argument_buffer(req->fm, req->in.arg[0], req->riq_id);
-	if(req->in.arglen[1] != 0)
-		rfuse_put_argument_buffer(req->fm, req->in.arg[1], req->riq_id);
-	if(req->out.arglen != 0)
+	/*
+	 * Requests whose data travels in pages (READ, WRITE, READDIR,
+	 * READLINK) use in.arglen[0] / out.arglen for the data size and own no
+	 * argument buffer: freeing in.arg[0] / out.arg (index 0) there would
+	 * release a buffer owned by another request.
+	 */
+	if (!req->in_pages) {
+		if(req->in.arglen[0] != 0)
+			rfuse_put_argument_buffer(req->fm, req->in.arg[0], req->riq_id);
+		if(req->in.arglen[1] != 0)
+			rfuse_put_argument_buffer(req->fm, req->in.arg[1], req->riq_id);
+	}
+	if(!req->out_pages && req->out.arglen != 0)
 		rfuse_put_argument_buffer(req->fm, req->out.arg, req->riq_id);
 
 	rfuse_put_request_buffer(req->fm, req->index, req->riq_id);
