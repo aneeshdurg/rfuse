@@ -428,7 +428,8 @@ void rfuse_file_release(struct inode *inode, struct fuse_file *ff,
 
 
 	rfuse_file_put(ff, r_req, ff->fm->fc->destroy, isdir);
-	if(ff->fm->fc->destroy) // Only put requests that are synchronous
+	/* ff may have been freed by rfuse_file_put() */
+	if(fm->fc->destroy) // Only put requests that are synchronous
 		rfuse_put_request(r_req);
 }
 
