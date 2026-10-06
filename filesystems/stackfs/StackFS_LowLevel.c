@@ -425,15 +425,14 @@ static void remerge_hash_table(struct lo_data *lo_data)
 	}
 }
 
-static int delete_from_hash_table(struct lo_data *lo_data,
+/* Caller holds lo_data->spinlock */
+static int __delete_from_hash_table(struct lo_data *lo_data,
 		struct lo_inode *lo_inode)
 {
 	struct lo_inode *prev, *next;
 
 	prev = next = NULL;
 	size_t hash = 0;
-
-	pthread_spin_lock(&lo_data->spinlock);
 
 	prev = lo_inode->prev;
 	next = lo_inode->next;
@@ -462,7 +461,6 @@ del_out:
 	if (lo_data->hash_table.use < lo_data->hash_table.size / 4)
 		remerge_hash_table(lo_data);
 
-	pthread_spin_unlock(&lo_data->spinlock);
 	return 0;
 }
 
@@ -737,6 +735,8 @@ static void stackfs_ll_create(fuse_req_t req, fuse_ino_t parent,
 		pthread_spin_lock(&lo_data->spinlock);
 
 		res = insert_to_hash_table(lo_data, lo_inode);
+		if (res != -1)
+			lo_inode->nlookup++;
 
 		pthread_spin_unlock(&lo_data->spinlock);
 
@@ -745,7 +745,6 @@ static void stackfs_ll_create(fuse_req_t req, fuse_ino_t parent,
 			free(lo_inode);
 			fuse_reply_err(req, EBUSY);
 		} else {
-			lo_inode->nlookup++;
 			e.ino = lo_inode->lo_ino;
 			//StackFS_trace("Create called, e.ino : %llu", e.ino);
 			fi->fh = fd;
@@ -820,6 +819,8 @@ static void stackfs_ll_mkdir(fuse_req_t req, fuse_ino_t parent,
 		pthread_spin_lock(&lo_data->spinlock);
 
 		res = insert_to_hash_table(lo_data, lo_inode);
+		if (res != -1)
+			lo_inode->nlookup++;
 
 		pthread_spin_unlock(&lo_data->spinlock);
 
@@ -828,7 +829,6 @@ static void stackfs_ll_mkdir(fuse_req_t req, fuse_ino_t parent,
 			free(lo_inode);
 			fuse_reply_err(req, EBUSY);
 		} else {
-			lo_inode->nlookup++;
 			e.ino = lo_inode->lo_ino;
 			//printf("Making directory finished\n");
 			fuse_reply_entry(req, &e);
@@ -1121,11 +1121,16 @@ static void forget_inode(fuse_req_t req, struct lo_inode *inode,
 {
 	int res;
 
+	struct lo_data *lo_data = get_lo_data(req);
+
+	/* nlookup is also changed by lookups, under the same lock */
+	pthread_spin_lock(&lo_data->spinlock);
 	assert(inode->nlookup >= nlookup);
 	inode->nlookup -= nlookup;
 
 	if (!inode->nlookup)
-		res = delete_from_hash_table(get_lo_data(req), inode);
+		res = __delete_from_hash_table(lo_data, inode);
+	pthread_spin_unlock(&lo_data->spinlock);
 
 	(void) res;
 }
@@ -1286,6 +1291,8 @@ static void stackfs_ll_symlink(fuse_req_t req, const char *link, fuse_ino_t pare
 		pthread_spin_lock(&lo_data->spinlock);
 
 		res = insert_to_hash_table(lo_data, lo_inode);
+		if (res != -1)
+			lo_inode->nlookup++;
 
 		pthread_spin_unlock(&lo_data->spinlock);
 
@@ -1294,7 +1301,6 @@ static void stackfs_ll_symlink(fuse_req_t req, const char *link, fuse_ino_t pare
 			free(lo_inode);
 			fuse_reply_err(req, EBUSY);
 		} else {
-			lo_inode->nlookup++;
 			e.ino = lo_inode->lo_ino;
 			//StackFS_trace("Create called, e.ino : %llu", e.ino);
 			fuse_reply_entry(req, &e);
@@ -1375,6 +1381,8 @@ static void stackfs_ll_link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent
 		pthread_spin_lock(&lo_data->spinlock);
 
 		res = insert_to_hash_table(lo_data, lo_inode);
+		if (res != -1)
+			lo_inode->nlookup++;
 
 		pthread_spin_unlock(&lo_data->spinlock);
 
@@ -1383,7 +1391,6 @@ static void stackfs_ll_link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent
 			free(lo_inode);
 			fuse_reply_err(req, EBUSY);
 		} else {
-			lo_inode->nlookup++;
 			e.ino = lo_inode->lo_ino;
 			//StackFS_trace("Create called, e.ino : %llu", e.ino);
 			fuse_reply_entry(req, &e);
