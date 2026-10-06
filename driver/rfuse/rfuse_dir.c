@@ -251,8 +251,9 @@ static void rfuse_lookup_init(struct fuse_mount *fm, struct rfuse_req *r_req, u6
 	arg = (struct rfuse_arg*)&riq->karg[in_arg];
 	memset(arg,0,sizeof(struct rfuse_arg));
 
-	// Copy the name into argument space
-	memcpy(arg, (char*)name->name, name->len+1);
+	// Copy the name into argument space.  name may point into the middle
+	// of a path (d_revalidate), so it isn't NUL-terminated; arg is zeroed.
+	memcpy(arg, (char*)name->name, name->len);
 
 	r_req->in.opcode = FUSE_LOOKUP;
 	r_req->in.nodeid = nodeid;
